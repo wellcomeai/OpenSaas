@@ -1,0 +1,72 @@
+.git
+.gitignore
+.gitattributes
+.github
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/venv
+**/env
+
+# Node / Next.js
+**/node_modules
+**/.next
+**/out
+**/build
+**/dist
+**/*.log
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# TypeScript
+**/tsconfig.tsbuildinfo
+
+# Env files (никогда не должны попасть в образ)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# IDE / OS
+.vscode
+.idea
+**/*.swp
+**/*.swo
+.DS_Store
+
+# Docs / repo housekeeping
+docs
+*.md
+!README.md
+LICENSE
+
+# Tests / coverage
+coverage
+.coverage
+htmlcov
+
+# DBs / dumps
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Misc
+*.tmp
+*.bak
+nginx/certs

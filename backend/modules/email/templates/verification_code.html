@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+  <h3 style="color:#111;">Подтверждение email</h3>
+  <p>Для завершения регистрации в {{ app_name }} введите код ниже:</p>
+  <div style="margin:32px auto;text-align:center;">
+    <div style="display:inline-block;background:#f4f4f4;border-radius:8px;padding:16px 40px;">
+      <span style="font-size:36px;font-weight:bold;letter-spacing:10px;color:#111;font-family:monospace;">{{ code }}</span>
+    </div>
+  </div>
+  <p style="font-size:13px;color:#666;">Код действителен <strong>10 минут</strong>.</p>
+  <p style="font-size:13px;color:#888;">
+    Если вы не регистрировались в {{ app_name }} — просто проигнорируйте это письмо.
+  </p>
+{% endblock %}

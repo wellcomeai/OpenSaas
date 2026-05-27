@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: opensaas_db
+      POSTGRES_USER: opensaas
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opensaas -d opensaas_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:10000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://opensaas:password@postgres:5432/opensaas_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_local:

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+  <h3 style="color:#111;">Подтвердите свой email</h3>
+  <p>Чтобы активировать аккаунт, перейдите по ссылке ниже:</p>
+  <p style="margin:24px 0;">
+    <a href="{{ confirm_url }}"
+       style="display:inline-block; background:#111; color:#fff; padding:12px 24px; border-radius:6px; text-decoration:none;">
+      Подтвердить email
+    </a>
+  </p>
+  <p style="font-size:13px; color:#666;">
+    Если кнопка не работает, скопируйте ссылку в браузер:<br>
+    <a href="{{ confirm_url }}" style="color:#666;">{{ confirm_url }}</a>
+  </p>
+  <p style="font-size:13px; color:#888;">Ссылка действительна 24 часа.</p>
+{% endblock %}

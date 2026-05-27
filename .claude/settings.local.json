@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(npm install *)",
+      "Bash(uipro init *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\vika1\\\\OneDrive\\\\Рабочий стол\\\\OpenSaas финальный\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"SaaS platform dashboard modern minimal professional\" --design-system -p \"OpenSaaS\")",
+      "Bash(python \".claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"SaaS platform dashboard modern minimal professional\" --design-system -p \"OpenSaaS\")",
+      "Bash(npx tsc *)",
+      "Bash(node_modules\\\\.bin\\\\tsc --noEmit)",
+      "Bash(git remote *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)"
+    ]
+  }
+}

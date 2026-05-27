@@ -1,0 +1,42 @@
+.git
+.gitignore
+
+# Node / Next.js
+node_modules
+.next
+out
+build
+dist
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript
+tsconfig.tsbuildinfo
+
+# Env files
+.env
+.env.*
+!.env.example
+.env.local
+
+# IDE / OS
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Tests / coverage
+coverage
+.nyc_output
+
+# Docker
+Dockerfile*
+.dockerignore
+
+# Misc
+*.tmp
+*.bak
+CLAUDE.md
+**/CLAUDE.md

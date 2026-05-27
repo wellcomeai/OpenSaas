@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: opensaas-postgres-dev
+    environment:
+      POSTGRES_DB: opensaas_db
+      POSTGRES_USER: opensaas
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opensaas -d opensaas_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: opensaas-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    profiles:
+      - with-redis
+
+volumes:
+  postgres_data:
+  redis_data:
+
+# Запуск без Redis:  docker-compose up -d
+# Запуск с Redis:    docker-compose --profile with-redis up -d
