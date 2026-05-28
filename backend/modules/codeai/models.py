@@ -183,6 +183,34 @@ class CodeAIMessage(Base):
     )
 
 
+class CodeAIInstallation(Base):
+    """Связка user_id ↔ GitHub App installation_id.
+
+    Создаётся в `/github/callback` после установки App. Используется
+    `service.list_user_repos`, чтобы знать какие installations принадлежат
+    пользователю — без необходимости хранить placeholder-проекты.
+    """
+
+    __tablename__ = "codeai_installations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    installation_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    account_login: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class CodeAISettings(Base):
     __tablename__ = "codeai_settings"
 

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 from uuid import UUID
 
 from fastapi import HTTPException
+from jose import JWTError, jwt
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +19,16 @@ from modules.auth.models import User
 from modules.codeai import agent, github_app, indexer, openrouter
 from modules.codeai.models import (
     CodeAIChunk,
+    CodeAIInstallation,
     CodeAIMessage,
     CodeAIProject,
     CodeAISession,
     CodeAISessionStatus,
     CodeAISettings,
 )
+
+INSTALL_STATE_TOKEN_TYPE = "github_install_state"
+INSTALL_STATE_TTL_MINUTES = 10
 from modules.codeai.schemas import (
     CodeAIProjectCreate,
     CodeAIRepoPublic,
@@ -228,16 +234,35 @@ async def cancel_session(
 
 # === Repos via GitHub App ===
 
+async def _user_installation_ids(db: AsyncSession, user: User) -> list[str]:
+    """Все installation_id, привязанные к юзеру.
+
+    Источник истины — таблица CodeAIInstallation; дополнительно
+    включаем installation_id из проектов юзера на случай, если запись
+    в таблице установок ещё не появилась (бэкомпат / расхождения).
+    """
+    install_rows = (
+        await db.scalars(
+            select(CodeAIInstallation.installation_id).where(
+                CodeAIInstallation.user_id == user.id
+            )
+        )
+    ).all()
+    project_rows = (
+        await db.scalars(
+            select(CodeAIProject.github_installation_id).where(
+                CodeAIProject.user_id == user.id
+            )
+        )
+    ).all()
+    return sorted({*install_rows, *project_rows})
+
+
 async def list_user_repos(
     db: AsyncSession, user: User
 ) -> list[CodeAIRepoPublic]:
-    """Возвращает репо доступные через сохранённые installations юзера.
-
-    Берёт installation_id из существующих проектов юзера, плюс позволяет
-    видеть все репо новой installation после OAuth callback.
-    """
-    projects = await list_projects(db, user)
-    installation_ids = sorted({p.github_installation_id for p in projects})
+    """Репо доступные юзеру через все его GitHub-installations."""
+    installation_ids = await _user_installation_ids(db, user)
 
     seen: set[str] = set()
     out: list[CodeAIRepoPublic] = []
@@ -261,6 +286,94 @@ async def list_user_repos(
                 )
             )
     return out
+
+
+# === GitHub install state (JWT с user_id для OAuth-style flow) ===
+
+def create_install_state(user_id: UUID) -> str:
+    """JWT, который пересылаем в `state` параметре GitHub App install URL.
+
+    GitHub вернёт его в callback — так бэкенд узнаёт, какому юзеру
+    привязать installation.
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "type": INSTALL_STATE_TOKEN_TYPE,
+        "iat": now,
+        "exp": now + timedelta(minutes=INSTALL_STATE_TTL_MINUTES),
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
+def decode_install_state(state: str) -> UUID:
+    """Валидирует state и возвращает user_id."""
+    try:
+        payload = jwt.decode(
+            state, settings.secret_key, algorithms=[settings.algorithm]
+        )
+    except JWTError as exc:
+        raise HTTPException(status_code=400, detail="Invalid state token") from exc
+
+    if payload.get("type") != INSTALL_STATE_TOKEN_TYPE:
+        raise HTTPException(status_code=400, detail="Invalid state token type")
+
+    sub = payload.get("sub")
+    if not sub:
+        raise HTTPException(status_code=400, detail="Invalid state token payload")
+    try:
+        return UUID(str(sub))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid user id in state") from exc
+
+
+def build_install_url(user_id: UUID) -> str:
+    """Возвращает GitHub App install URL с `state` JWT.
+
+    Если базовый URL не настроен — возвращает пустую строку (фронтенд
+    покажет соответствующую ошибку).
+    """
+    base = (settings.github_app_installation_url or "").strip()
+    if not base:
+        return ""
+    state = create_install_state(user_id)
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}state={state}"
+
+
+async def save_installation(
+    db: AsyncSession,
+    user_id: UUID,
+    installation_id: str,
+    account_login: str | None = None,
+) -> CodeAIInstallation:
+    """Upsert: привязывает installation к юзеру.
+
+    Если installation уже привязан к другому юзеру — переписывает на
+    нового (юзер мог переустановить App для своей учётки).
+    """
+    existing = await db.scalar(
+        select(CodeAIInstallation).where(
+            CodeAIInstallation.installation_id == installation_id
+        )
+    )
+    if existing is not None:
+        existing.user_id = user_id
+        if account_login is not None:
+            existing.account_login = account_login
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+
+    row = CodeAIInstallation(
+        user_id=user_id,
+        installation_id=installation_id,
+        account_login=account_login,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 # === Settings ===

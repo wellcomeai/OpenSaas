@@ -49,29 +49,57 @@ router = APIRouter(prefix="/codeai", tags=["codeai"])
 
 @router.get("/github/install-url")
 async def github_install_url(user: CurrentUser):
-    """Возвращает URL установки GitHub App.
+    """URL установки GitHub App с `state`-JWT, привязывающим к юзеру.
 
-    Фронтенд получает URL отсюда, чтобы не зависеть от
-    `NEXT_PUBLIC_*` переменных, которые вшиваются в билд.
+    Фронтенд получает URL отсюда, чтобы:
+      1. Не зависеть от `NEXT_PUBLIC_*` переменных (вшиваются в билд).
+      2. Передать в `state` подписанный user_id — это позволит callback'у
+         знать, какому юзеру привязать installation_id.
     """
-    return {"url": settings.github_app_installation_url}
+    return {"url": service.build_install_url(user.id)}
 
 
 @router.get("/github/callback")
 async def github_callback(
+    db: Annotated[AsyncSession, Depends(get_db)],
     installation_id: str | None = None,
     setup_action: str | None = None,
+    state: str | None = None,
+    code: str | None = None,
 ):
-    """GitHub App OAuth/setup callback.
+    """GitHub App setup callback.
 
-    GitHub redirects to this URL after the user installs the App.
-    We just bounce the user back to the frontend with the installation_id.
+    GitHub redirects сюда после установки App. Параметры:
+      - installation_id: id новой installation
+      - setup_action: install | update | request
+      - state: подписанный JWT с user_id (создан в `/github/install-url`)
+      - code: опционально, если включена OAuth-during-install
+
+    Сохраняем связку user_id ↔ installation_id и редиректим юзера обратно.
     """
     target = f"{settings.app_url.rstrip('/')}/codeai"
-    if installation_id:
-        target += f"?installation_id={installation_id}"
-        if setup_action:
-            target += f"&setup_action={setup_action}"
+    params: list[str] = []
+
+    if installation_id and state:
+        try:
+            user_id = service.decode_install_state(state)
+            await service.save_installation(db, user_id, installation_id)
+            params.append("installed=true")
+            params.append(f"installation_id={installation_id}")
+        except HTTPException as exc:
+            logger.warning("GitHub callback: invalid state: %s", exc.detail)
+            params.append("install_error=invalid_state")
+    elif installation_id:
+        # Старые ссылки без state — тоже передадим installation_id, но
+        # юзеру придётся быть залогиненным, и list_user_repos не увидит
+        # эту installation, пока он не создаст проект.
+        params.append(f"installation_id={installation_id}")
+
+    if setup_action:
+        params.append(f"setup_action={setup_action}")
+
+    if params:
+        target += "?" + "&".join(params)
     return RedirectResponse(url=target)
 
 

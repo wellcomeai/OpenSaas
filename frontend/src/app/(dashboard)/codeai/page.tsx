@@ -29,6 +29,8 @@ export default function CodeAIProjectsPage() {
   const router = useRouter();
   const params = useSearchParams();
   const installationIdFromUrl = params.get("installation_id");
+  const justInstalled = params.get("installed") === "true";
+  const installError = params.get("install_error");
 
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -43,12 +45,23 @@ export default function CodeAIProjectsPage() {
     staleTime: 60 * 60 * 1000,
   });
 
-  // После установки GitHub App юзер возвращается с installation_id в URL
+  // После установки GitHub App юзер возвращается на /codeai?installed=true&installation_id=...
   useEffect(() => {
-    if (installationIdFromUrl) {
+    if (justInstalled) {
+      toast.success("GitHub App установлен");
+      qc.invalidateQueries({ queryKey: ["codeai-repos"] });
+      setPickerOpen(true);
+    } else if (installationIdFromUrl) {
       setPickerOpen(true);
     }
-  }, [installationIdFromUrl]);
+  }, [justInstalled, installationIdFromUrl, qc]);
+
+  useEffect(() => {
+    if (installError) {
+      toast.error("Не удалось подтвердить установку GitHub App");
+      router.replace("/codeai");
+    }
+  }, [installError, router]);
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => codeaiApi.deleteProject(id),
