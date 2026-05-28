@@ -47,6 +47,16 @@ router = APIRouter(prefix="/codeai", tags=["codeai"])
 
 # === GitHub ===
 
+@router.get("/github/install-url")
+async def github_install_url(user: CurrentUser):
+    """Возвращает URL установки GitHub App.
+
+    Фронтенд получает URL отсюда, чтобы не зависеть от
+    `NEXT_PUBLIC_*` переменных, которые вшиваются в билд.
+    """
+    return {"url": settings.github_app_installation_url}
+
+
 @router.get("/github/callback")
 async def github_callback(
     installation_id: str | None = None,

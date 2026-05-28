@@ -12,6 +12,13 @@ import type {
 
 export const codeaiApi = {
   // GitHub
+  async getGithubConnectUrl(): Promise<string> {
+    const r = await apiClient.get<{ url: string }>(
+      "/api/v1/codeai/github/install-url",
+    );
+    return r.data.url ?? "";
+  },
+
   async listRepos(): Promise<CodeAIRepo[]> {
     const r = await apiClient.get("/api/v1/codeai/repos");
     return r.data;

@@ -24,9 +24,6 @@ import {
 import { codeaiApi } from "@/api/codeai";
 import { formatDateTime } from "@/lib/utils";
 
-const GITHUB_APP_INSTALL_URL =
-  process.env.NEXT_PUBLIC_GITHUB_APP_INSTALL_URL ?? "";
-
 export default function CodeAIProjectsPage() {
   const qc = useQueryClient();
   const router = useRouter();
@@ -38,6 +35,12 @@ export default function CodeAIProjectsPage() {
   const { data: projects, isLoading } = useQuery({
     queryKey: ["codeai-projects"],
     queryFn: () => codeaiApi.listProjects(),
+  });
+
+  const { data: installUrl } = useQuery({
+    queryKey: ["codeai-github-install-url"],
+    queryFn: () => codeaiApi.getGithubConnectUrl(),
+    staleTime: 60 * 60 * 1000,
   });
 
   // После установки GitHub App юзер возвращается с installation_id в URL
@@ -63,7 +66,7 @@ export default function CodeAIProjectsPage() {
     },
   });
 
-  const hasInstallationUrl = Boolean(GITHUB_APP_INSTALL_URL);
+  const hasInstallationUrl = Boolean(installUrl);
 
   return (
     <>
@@ -95,7 +98,7 @@ export default function CodeAIProjectsPage() {
             </div>
             {hasInstallationUrl ? (
               <a
-                href={GITHUB_APP_INSTALL_URL}
+                href={installUrl}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -106,7 +109,7 @@ export default function CodeAIProjectsPage() {
               </a>
             ) : (
               <p className="text-xs text-destructive">
-                Не задан NEXT_PUBLIC_GITHUB_APP_INSTALL_URL
+                GitHub App не настроен на сервере (GITHUB_APP_INSTALLATION_URL)
               </p>
             )}
           </CardContent>
@@ -119,7 +122,7 @@ export default function CodeAIProjectsPage() {
             <CardTitle>Мои репозитории</CardTitle>
             {hasInstallationUrl && (
               <a
-                href={GITHUB_APP_INSTALL_URL}
+                href={installUrl}
                 target="_blank"
                 rel="noopener noreferrer"
               >
