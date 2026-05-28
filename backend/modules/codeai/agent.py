@@ -1,10 +1,10 @@
-"""AI Agent: semantic search → planning → execution."""
+"""AI Agent: repo file selection → planning → execution."""
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,13 +12,12 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import AsyncSessionLocal
 from modules.codeai import github_app, indexer, openrouter
 from modules.codeai.models import (
-    CodeAIChunk,
     CodeAIMessage,
     CodeAIMessageRole,
     CodeAIMessageType,
@@ -57,45 +56,91 @@ async def stream_events(session_id: UUID):
             break
 
 
-# === Semantic search ===
+# === Repo structure ===
 
-async def semantic_search(
-    db: AsyncSession, project_id: UUID, query: str, top_k: int = 10
-) -> list[CodeAIChunk]:
-    try:
-        query_emb = await openrouter.get_embedding(query)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Embedding for query failed, falling back to keyword search: %s", e)
-        return await _keyword_search(db, project_id, query, top_k)
+def collect_repo_structure(repo_path: str, limit: int = 2000) -> list[str]:
+    paths: list[str] = []
+    root = Path(repo_path)
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        if any(
+            part in indexer.SKIP_DIRS for part in p.relative_to(root).parts
+        ):
+            continue
+        paths.append(str(p.relative_to(root)))
+        if len(paths) >= limit:
+            break
+    return paths
 
-    stmt = (
-        select(CodeAIChunk)
-        .where(CodeAIChunk.project_id == project_id)
-        .where(CodeAIChunk.embedding.is_not(None))
-        .order_by(CodeAIChunk.embedding.cosine_distance(query_emb))
-        .limit(top_k)
+
+# === File selection ===
+
+FILE_SELECTION_SYSTEM = """You are CodeAI, an autonomous coding agent.
+You receive a user task and the full list of files in a repository.
+Pick the files that you need to READ in order to plan the change.
+
+Respond ONLY with valid JSON:
+{"files": ["path/to/file1", "path/to/file2", ...]}
+
+Pick at most 20 files. Prefer source code, configs and entry points
+relevant to the task. Avoid lock files, build artifacts, and tests
+unless the task explicitly concerns them.
+"""
+
+
+def _build_selection_messages(
+    task: str, file_list: list[str]
+) -> list[dict[str, Any]]:
+    list_blob = "\n".join(file_list)
+    return [
+        {"role": "system", "content": FILE_SELECTION_SYSTEM},
+        {
+            "role": "user",
+            "content": f"Task: {task}\n\nRepository files:\n{list_blob}",
+        },
+    ]
+
+
+async def select_relevant_files(
+    task: str, file_list: list[str], planning_model: str
+) -> list[str]:
+    messages = _build_selection_messages(task, file_list)
+    raw = await openrouter.chat_completion(
+        planning_model,
+        messages,
+        temperature=0.1,
+        response_format={"type": "json_object"},
     )
-    return list((await db.scalars(stmt)).all())
+    data = _extract_json(raw)
+    files = data.get("files") or []
+    # Keep only files that actually exist in the listing.
+    available = set(file_list)
+    return [f for f in files if isinstance(f, str) and f in available][:20]
 
 
-async def _keyword_search(
-    db: AsyncSession, project_id: UUID, query: str, top_k: int
-) -> list[CodeAIChunk]:
-    pattern = f"%{query[:80]}%"
-    stmt = (
-        select(CodeAIChunk)
-        .where(CodeAIChunk.project_id == project_id)
-        .where(CodeAIChunk.content.ilike(pattern))
-        .limit(top_k)
-    )
-    return list((await db.scalars(stmt)).all())
+def _read_files(repo_path: str, paths: list[str]) -> dict[str, str]:
+    root = Path(repo_path)
+    max_bytes = settings.codeai_max_file_size_kb * 1024
+    out: dict[str, str] = {}
+    for rel in paths:
+        full = root / rel
+        try:
+            if not full.is_file():
+                continue
+            if full.stat().st_size > max_bytes:
+                continue
+            out[rel] = full.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    return out
 
 
 # === Planning ===
 
 PLANNING_SYSTEM = """You are CodeAI, an autonomous coding agent.
-Given a user task and a set of relevant code chunks from the repository,
-produce a concrete plan to fulfill the task.
+Given a user task and the FULL contents of relevant files from the
+repository, produce a concrete plan to fulfill the task.
 
 Respond ONLY with valid JSON matching this schema:
 {
@@ -111,21 +156,20 @@ Respond ONLY with valid JSON matching this schema:
 
 
 def _build_planning_messages(
-    task: str, chunks: list[CodeAIChunk], repo_structure: list[str]
+    task: str, files: dict[str, str], repo_structure: list[str]
 ) -> list[dict[str, Any]]:
-    chunk_blob = "\n\n".join(
-        f"# {c.file_path}:{c.start_line}-{c.end_line}\n{c.content}"
-        for c in chunks
+    files_blob = "\n\n".join(
+        f"# {path}\n{content}" for path, content in files.items()
     )
-    structure_blob = "\n".join(repo_structure[:200])
+    structure_blob = "\n".join(repo_structure[:500])
     return [
         {"role": "system", "content": PLANNING_SYSTEM},
         {
             "role": "user",
             "content": (
                 f"Task: {task}\n\n"
-                f"Repository structure (top 200 files):\n{structure_blob}\n\n"
-                f"Relevant code chunks:\n{chunk_blob}"
+                f"Repository structure:\n{structure_blob}\n\n"
+                f"File contents:\n{files_blob}"
             ),
         },
     ]
@@ -141,11 +185,11 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 async def build_plan(
     task: str,
-    chunks: list[CodeAIChunk],
+    files: dict[str, str],
     repo_structure: list[str],
     planning_model: str,
 ) -> dict[str, Any]:
-    messages = _build_planning_messages(task, chunks, repo_structure)
+    messages = _build_planning_messages(task, files, repo_structure)
     raw = await openrouter.chat_completion(
         planning_model,
         messages,
@@ -193,11 +237,21 @@ async def _edit_file_with_llm(
     return raw
 
 
-async def execute_plan(session_id: UUID) -> None:
-    """Запускается как background task после confirm_plan.
+def _make_unified_diff(
+    rel_path: str, before: str, after: str
+) -> str:
+    return "".join(
+        difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=f"a/{rel_path}",
+            tofile=f"b/{rel_path}",
+        )
+    )
 
-    Открывает собственную DB сессию.
-    """
+
+async def execute_plan(session_id: UUID) -> None:
+    """Запускается как background task после confirm_plan."""
     async with AsyncSessionLocal() as db:
         await _execute_plan_inner(db, session_id)
 
@@ -264,8 +318,29 @@ async def _execute_plan_inner(db: AsyncSession, session_id: UUID) -> None:
 
             if action == "delete":
                 if full.exists():
+                    try:
+                        before = full.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        before = ""
                     full.unlink()
                     files_changed.append(rel_path)
+                    diff = _make_unified_diff(rel_path, before, "")
+                    await publish_event(
+                        session.id,
+                        {
+                            "type": "diff",
+                            "path": rel_path,
+                            "action": action,
+                            "diff": diff,
+                        },
+                    )
+                    await _log_message(
+                        db,
+                        session.id,
+                        diff,
+                        CodeAIMessageType.DIFF,
+                        metadata={"path": rel_path, "action": action},
+                    )
                 continue
 
             current = ""
@@ -283,11 +358,46 @@ async def _execute_plan_inner(db: AsyncSession, session_id: UUID) -> None:
                 if full.exists():
                     full.unlink()
                     files_changed.append(rel_path)
+                    diff = _make_unified_diff(rel_path, current, "")
+                    await publish_event(
+                        session.id,
+                        {
+                            "type": "diff",
+                            "path": rel_path,
+                            "action": "delete",
+                            "diff": diff,
+                        },
+                    )
+                    await _log_message(
+                        db,
+                        session.id,
+                        diff,
+                        CodeAIMessageType.DIFF,
+                        metadata={"path": rel_path, "action": "delete"},
+                    )
                 continue
 
             full.parent.mkdir(parents=True, exist_ok=True)
             full.write_text(new_content, encoding="utf-8")
             files_changed.append(rel_path)
+
+            diff = _make_unified_diff(rel_path, current, new_content)
+            await publish_event(
+                session.id,
+                {
+                    "type": "diff",
+                    "path": rel_path,
+                    "action": action,
+                    "diff": diff,
+                },
+            )
+            await _log_message(
+                db,
+                session.id,
+                diff,
+                CodeAIMessageType.DIFF,
+                metadata={"path": rel_path, "action": action},
+            )
 
         if not files_changed:
             raise RuntimeError("No files were changed")
@@ -359,22 +469,6 @@ async def _log_message(
     await db.commit()
 
 
-def collect_repo_structure(repo_path: str, limit: int = 500) -> list[str]:
-    paths: list[str] = []
-    root = Path(repo_path)
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        if any(
-            part in indexer.SKIP_DIRS for part in p.relative_to(root).parts
-        ):
-            continue
-        paths.append(str(p.relative_to(root)))
-        if len(paths) >= limit:
-            break
-    return paths
-
-
 async def run_planning(session_id: UUID) -> None:
     """Background task: planning после создания сессии."""
     async with AsyncSessionLocal() as db:
@@ -398,18 +492,61 @@ async def _run_planning_inner(db: AsyncSession, session_id: UUID) -> None:
         else settings.codeai_default_planning_model
     )
 
+    workspace = Path(settings.codeai_workspace_dir) / f"plan-{session.id}"
+
     try:
         session.status = CodeAISessionStatus.PLANNING
         await db.commit()
-        await publish_event(session.id, {"type": "status", "message": "Семантический поиск по коду..."})
 
-        chunks = await semantic_search(db, project.id, session.task, top_k=10)
-        repo_structure = [c.file_path for c in chunks]  # минимальная структура
-        # Уникальные пути
-        repo_structure = list(dict.fromkeys(repo_structure))
+        await publish_event(
+            session.id,
+            {"type": "status", "message": "Клонирую репозиторий..."},
+        )
+        await _log_message(
+            db, session.id, "Клонирую репозиторий...", CodeAIMessageType.STATUS
+        )
 
-        await publish_event(session.id, {"type": "status", "message": "Строю план..."})
-        plan = await build_plan(session.task, chunks, repo_structure, planning_model)
+        install_token = await github_app.get_installation_token(
+            project.github_installation_id
+        )
+        repo_path = github_app.clone_repo(
+            project.repo_full_name, install_token, str(workspace)
+        )
+
+        await publish_event(
+            session.id,
+            {"type": "status", "message": "Собираю список файлов..."},
+        )
+        file_list = collect_repo_structure(repo_path)
+
+        await publish_event(
+            session.id,
+            {"type": "status", "message": "LLM выбирает релевантные файлы..."},
+        )
+        selected = await select_relevant_files(
+            session.task, file_list, planning_model
+        )
+
+        await publish_event(
+            session.id,
+            {"type": "tool_read", "files": selected},
+        )
+        await _log_message(
+            db,
+            session.id,
+            "Читаю файлы: " + ", ".join(selected),
+            CodeAIMessageType.STATUS,
+            metadata={"tool": "read", "files": selected},
+        )
+
+        files_content = _read_files(repo_path, selected)
+
+        await publish_event(
+            session.id, {"type": "status", "message": "Строю план..."}
+        )
+        plan = await build_plan(
+            session.task, files_content, file_list, planning_model
+        )
 
         session.plan = plan
         session.branch_name = plan.get("branch_name")
@@ -435,3 +572,5 @@ async def _run_planning_inner(db: AsyncSession, session_id: UUID) -> None:
             db, session.id, f"Ошибка планирования: {e}", CodeAIMessageType.STATUS
         )
         await publish_event(session.id, {"type": "error", "message": str(e)})
+    finally:
+        github_app.cleanup_workspace(str(workspace))

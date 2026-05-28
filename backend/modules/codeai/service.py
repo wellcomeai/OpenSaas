@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Sequence
 from uuid import UUID
 
@@ -14,9 +13,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from database import AsyncSessionLocal
 from modules.auth.models import User
-from modules.codeai import agent, github_app, indexer, openrouter
+from modules.codeai import agent, github_app, openrouter
 from modules.codeai.models import (
     CodeAIChunk,
     CodeAIInstallation,
@@ -111,33 +109,13 @@ async def get_project_status(
 async def start_indexing(
     db: AsyncSession, user: User, project_id: UUID
 ) -> None:
+    """No-op. Indexing is no longer required — the agent works directly
+    on the repository file list at planning time. Marks the project as
+    "indexed" so the UI does not nag the user."""
     project = await get_project(db, user, project_id)
-    project.is_indexed = False
-    project.indexed_at = None
+    project.is_indexed = True
+    project.indexed_at = datetime.now(timezone.utc)
     await db.commit()
-    asyncio.create_task(_run_indexing(project.id, project.repo_full_name, project.github_installation_id))
-
-
-async def _run_indexing(
-    project_id: UUID, repo_full_name: str, installation_id: str
-) -> None:
-    print(f"[CODEAI] _run_indexing START: project={project_id} repo={repo_full_name}", flush=True)
-    workspace = Path(settings.codeai_workspace_dir) / f"index-{project_id}"
-    try:
-        print(f"[CODEAI] Getting installation token for {installation_id}", flush=True)
-        token = await github_app.get_installation_token(installation_id)
-        print(f"[CODEAI] Got token, cloning {repo_full_name} to {workspace}", flush=True)
-        repo_path = github_app.clone_repo(repo_full_name, token, str(workspace))
-        print(f"[CODEAI] Cloned successfully, starting indexing", flush=True)
-        async with AsyncSessionLocal() as db:
-            count = await indexer.index_repo(db, project_id, repo_path)
-        print(f"[CODEAI] Indexing DONE: {count} chunks for project {project_id}", flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"[CODEAI] _run_indexing FAILED: {type(e).__name__}: {e}", flush=True)
-        logger.exception("Indexing failed for project %s", project_id)
-    finally:
-        print(f"[CODEAI] Cleanup workspace {workspace}", flush=True)
-        github_app.cleanup_workspace(str(workspace))
 
 
 # === Sessions ===
