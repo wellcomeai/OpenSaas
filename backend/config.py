@@ -75,6 +75,30 @@ class Settings(BaseSettings):
     trial_days: int = Field(default=3)
     referral_commission_percent: int = Field(default=20)
 
+    # === GitHub App (CodeAI) ===
+    github_app_id: str = Field(default="")
+    github_app_private_key: str = Field(default="")
+    github_app_webhook_secret: str = Field(default="")
+    github_app_client_id: str = Field(default="")
+    github_app_client_secret: str = Field(default="")
+    github_app_installation_url: str = Field(default="")
+
+    # === OpenRouter (CodeAI) ===
+    openrouter_api_key: str = Field(default="")
+    codeai_default_planning_model: str = Field(
+        default="deepseek/deepseek-chat"
+    )
+    codeai_default_editing_model: str = Field(
+        default="deepseek/deepseek-chat"
+    )
+    codeai_embeddings_model: str = Field(default="openai/text-embedding-3-small")
+
+    # === CodeAI runtime ===
+    codeai_workspace_dir: str = Field(default="./tmp/repos")
+    codeai_max_file_size_kb: int = Field(default=500)
+    codeai_chunk_size: int = Field(default=100)
+    codeai_chunk_overlap: int = Field(default=20)
+
     # === Планы подписки ===
     plan_basic_name: str = Field(default="Basic")
     plan_basic_price: Decimal = Field(default=Decimal("990"))

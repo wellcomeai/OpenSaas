@@ -29,3 +29,10 @@ python-dotenv==1.2.2
 
 # Redis (опционально, импортируется только если REDIS_URL задан)
 redis==5.0.4
+
+# CodeAI (GitHub App + pgvector + LLM)
+gitpython==3.1.43
+pgvector==0.3.2
+openai==1.40.0
+PyJWT==2.8.0
+cryptography==42.0.8

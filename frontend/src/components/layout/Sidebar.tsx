@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
+  Bot,
   CreditCard,
   Gift,
   LayoutDashboard,
@@ -19,6 +20,7 @@ import { cn } from "@/lib/utils";
 
 const userNav = [
   { href: "/dashboard", label: "Главная", icon: LayoutDashboard },
+  { href: "/codeai", label: "CodeAI", icon: Bot },
   { href: "/billing", label: "Подписка", icon: CreditCard },
   { href: "/referrals", label: "Рефералы", icon: Gift },
   { href: "/settings", label: "Настройки", icon: Settings },
