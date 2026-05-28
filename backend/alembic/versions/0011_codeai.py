@@ -19,6 +19,53 @@ def upgrade() -> None:
     # pgvector extension
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
+    # Очистка возможного частичного состояния от ранее упавшего запуска
+    op.execute("DROP TABLE IF EXISTS codeai_messages CASCADE")
+    op.execute("DROP TABLE IF EXISTS codeai_sessions CASCADE")
+    op.execute("DROP TABLE IF EXISTS codeai_chunks CASCADE")
+    op.execute("DROP TABLE IF EXISTS codeai_settings CASCADE")
+    op.execute("DROP TABLE IF EXISTS codeai_projects CASCADE")
+
+    # Создаём enum типы ОДИН раз с checkfirst — а в колонках ниже
+    # используем postgresql.ENUM(..., create_type=False), чтобы
+    # create_table не пытался создать тип повторно.
+    session_status = postgresql.ENUM(
+        "idle",
+        "planning",
+        "awaiting_confirmation",
+        "executing",
+        "done",
+        "error",
+        name="codeai_session_status",
+        create_type=False,
+    )
+    message_role = postgresql.ENUM(
+        "user", "assistant", "system",
+        name="codeai_message_role",
+        create_type=False,
+    )
+    message_type = postgresql.ENUM(
+        "chat", "plan", "status", "diff",
+        name="codeai_message_type",
+        create_type=False,
+    )
+    bind = op.get_bind()
+    sa.Enum(
+        "idle",
+        "planning",
+        "awaiting_confirmation",
+        "executing",
+        "done",
+        "error",
+        name="codeai_session_status",
+    ).create(bind, checkfirst=True)
+    sa.Enum(
+        "user", "assistant", "system", name="codeai_message_role"
+    ).create(bind, checkfirst=True)
+    sa.Enum(
+        "chat", "plan", "status", "diff", name="codeai_message_type"
+    ).create(bind, checkfirst=True)
+
     op.create_table(
         "codeai_projects",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -97,17 +144,6 @@ def upgrade() -> None:
         "WITH (lists = 100)"
     )
 
-    session_status = sa.Enum(
-        "idle",
-        "planning",
-        "awaiting_confirmation",
-        "executing",
-        "done",
-        "error",
-        name="codeai_session_status",
-    )
-    session_status.create(op.get_bind(), checkfirst=True)
-
     op.create_table(
         "codeai_sessions",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -149,15 +185,6 @@ def upgrade() -> None:
     op.create_index(
         "ix_codeai_sessions_project_id", "codeai_sessions", ["project_id"]
     )
-
-    message_role = sa.Enum(
-        "user", "assistant", "system", name="codeai_message_role"
-    )
-    message_role.create(op.get_bind(), checkfirst=True)
-    message_type = sa.Enum(
-        "chat", "plan", "status", "diff", name="codeai_message_type"
-    )
-    message_type.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "codeai_messages",
@@ -219,21 +246,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_codeai_settings_user_id", table_name="codeai_settings")
-    op.drop_table("codeai_settings")
-
-    op.drop_index("ix_codeai_messages_session_id", table_name="codeai_messages")
-    op.drop_table("codeai_messages")
-    sa.Enum(name="codeai_message_type").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="codeai_message_role").drop(op.get_bind(), checkfirst=True)
-
-    op.drop_index("ix_codeai_sessions_project_id", table_name="codeai_sessions")
-    op.drop_table("codeai_sessions")
-    sa.Enum(name="codeai_session_status").drop(op.get_bind(), checkfirst=True)
-
+    op.execute("DROP TABLE IF EXISTS codeai_messages CASCADE")
+    op.execute("DROP TABLE IF EXISTS codeai_sessions CASCADE")
     op.execute("DROP INDEX IF EXISTS codeai_chunks_embedding_ivfflat")
-    op.drop_index("ix_codeai_chunks_project_id", table_name="codeai_chunks")
-    op.drop_table("codeai_chunks")
-
-    op.drop_index("ix_codeai_projects_user_id", table_name="codeai_projects")
-    op.drop_table("codeai_projects")
+    op.execute("DROP TABLE IF EXISTS codeai_chunks CASCADE")
+    op.execute("DROP TABLE IF EXISTS codeai_settings CASCADE")
+    op.execute("DROP TABLE IF EXISTS codeai_projects CASCADE")
+    op.execute("DROP TYPE IF EXISTS codeai_message_type")
+    op.execute("DROP TYPE IF EXISTS codeai_message_role")
+    op.execute("DROP TYPE IF EXISTS codeai_session_status")
