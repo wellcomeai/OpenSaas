@@ -1,11 +1,10 @@
-"""AI Agent: repo file selection → planning → execution."""
+"""Conversational CodeAI agent — tool-calling loop."""
 from __future__ import annotations
 
 import asyncio
 import difflib
 import json
 import logging
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import AsyncSessionLocal
-from modules.codeai import github_app, indexer, openrouter
+from modules.codeai import github_app, indexer, openrouter, tools
 from modules.codeai.models import (
     CodeAIMessage,
     CodeAIMessageRole,
@@ -30,7 +29,8 @@ from modules.codeai.models import (
 logger = logging.getLogger("codeai.agent")
 
 
-# In-memory event broker for SSE streaming of session statuses
+# === In-memory SSE event broker ===
+
 _session_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 
 
@@ -52,401 +52,65 @@ async def stream_events(session_id: UUID):
     while True:
         event = await q.get()
         yield event
-        if event.get("type") == "done" or event.get("type") == "error":
+        if event.get("type") in ("done", "error", "assistant"):
             break
 
 
-# === Repo structure ===
+# === System prompt ===
 
-def collect_repo_structure(repo_path: str, limit: int = 2000) -> list[str]:
-    paths: list[str] = []
-    root = Path(repo_path)
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        if any(
-            part in indexer.SKIP_DIRS for part in p.relative_to(root).parts
-        ):
-            continue
-        paths.append(str(p.relative_to(root)))
-        if len(paths) >= limit:
-            break
-    return paths
+SYSTEM_PROMPT = """Ты AI-агент для работы с кодом. У тебя есть доступ к \
+GitHub репозиторию пользователя через инструменты.
 
+Правила:
+- Если вопрос общий или нужны уточнения — отвечай текстом, не лезь в код.
+- Для конкретной задачи: сначала list_files, потом read_file нужных файлов, \
+потом edit_file. Всегда читай файл перед тем как его менять.
+- Когда все изменения готовы — вызови create_pr (один раз).
+- Если чего-то не понимаешь — спроси текстом без инструментов.
 
-# === File selection ===
-
-FILE_SELECTION_SYSTEM = """You are CodeAI, an autonomous coding agent.
-You receive a user task and the full list of files in a repository.
-Pick the files that you need to READ in order to plan the change.
-
-Respond ONLY with valid JSON:
-{"files": ["path/to/file1", "path/to/file2", ...]}
-
-Pick at most 20 files. Prefer source code, configs and entry points
-relevant to the task. Avoid lock files, build artifacts, and tests
-unless the task explicitly concerns them.
+Репозиторий: {repo_full_name}
+Ветка по умолчанию: {default_branch}
 """
 
 
-def _build_selection_messages(
-    task: str, file_list: list[str]
-) -> list[dict[str, Any]]:
-    list_blob = "\n".join(file_list)
-    return [
-        {"role": "system", "content": FILE_SELECTION_SYSTEM},
-        {
-            "role": "user",
-            "content": f"Task: {task}\n\nRepository files:\n{list_blob}",
-        },
-    ]
+# === History reconstruction ===
 
-
-async def select_relevant_files(
-    task: str, file_list: list[str], planning_model: str
-) -> list[str]:
-    messages = _build_selection_messages(task, file_list)
-    raw = await openrouter.chat_completion(
-        planning_model,
-        messages,
-        temperature=0.1,
-        response_format={"type": "json_object"},
+async def _load_history(
+    db: AsyncSession, session_id: UUID
+) -> list[CodeAIMessage]:
+    rows = await db.scalars(
+        select(CodeAIMessage)
+        .where(CodeAIMessage.session_id == session_id)
+        .order_by(CodeAIMessage.created_at.asc())
     )
-    data = _extract_json(raw)
-    files = data.get("files") or []
-    # Keep only files that actually exist in the listing.
-    available = set(file_list)
-    return [f for f in files if isinstance(f, str) and f in available][:20]
+    return list(rows.all())
 
 
-def _read_files(repo_path: str, paths: list[str]) -> dict[str, str]:
-    root = Path(repo_path)
-    max_bytes = settings.codeai_max_file_size_kb * 1024
-    out: dict[str, str] = {}
-    for rel in paths:
-        full = root / rel
-        try:
-            if not full.is_file():
-                continue
-            if full.stat().st_size > max_bytes:
-                continue
-            out[rel] = full.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+def _build_llm_history(
+    messages: list[CodeAIMessage], system_prompt: str
+) -> list[dict[str, Any]]:
+    """Convert persisted messages into OpenAI-style chat messages.
+
+    Past tool calls are intentionally NOT replayed: the workspace from the
+    previous turn is gone, so re-issuing the same tool_call_ids would be
+    meaningless. Instead we keep the dialogue text: user requests +
+    assistant chat replies. The agent can re-`list_files`/`read_file`
+    whenever it needs fresh state.
+    """
+    out: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+    for m in messages:
+        if m.role == CodeAIMessageRole.USER:
+            out.append({"role": "user", "content": m.content})
+        elif (
+            m.role == CodeAIMessageRole.ASSISTANT
+            and m.message_type == CodeAIMessageType.CHAT
+            and m.content.strip()
+        ):
+            out.append({"role": "assistant", "content": m.content})
     return out
 
 
-# === Planning ===
-
-PLANNING_SYSTEM = """You are CodeAI, an autonomous coding agent.
-Given a user task and the FULL contents of relevant files from the
-repository, produce a concrete plan to fulfill the task.
-
-Respond ONLY with valid JSON matching this schema:
-{
-  "reasoning": "string explaining the approach",
-  "files_to_change": [
-    {"path": "relative/path", "action": "modify|create|delete", "description": "what to change"}
-  ],
-  "branch_name": "ai/short-kebab-case",
-  "pr_title": "short imperative title",
-  "pr_description": "markdown describing the change"
-}
-"""
-
-
-def _build_planning_messages(
-    task: str, files: dict[str, str], repo_structure: list[str]
-) -> list[dict[str, Any]]:
-    files_blob = "\n\n".join(
-        f"# {path}\n{content}" for path, content in files.items()
-    )
-    structure_blob = "\n".join(repo_structure[:500])
-    return [
-        {"role": "system", "content": PLANNING_SYSTEM},
-        {
-            "role": "user",
-            "content": (
-                f"Task: {task}\n\n"
-                f"Repository structure:\n{structure_blob}\n\n"
-                f"File contents:\n{files_blob}"
-            ),
-        },
-    ]
-
-
-def _extract_json(text: str) -> dict[str, Any]:
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    return json.loads(text)
-
-
-async def build_plan(
-    task: str,
-    files: dict[str, str],
-    repo_structure: list[str],
-    planning_model: str,
-) -> dict[str, Any]:
-    messages = _build_planning_messages(task, files, repo_structure)
-    raw = await openrouter.chat_completion(
-        planning_model,
-        messages,
-        temperature=0.2,
-        response_format={"type": "json_object"},
-    )
-    return _extract_json(raw)
-
-
-# === Execution ===
-
-EDITING_SYSTEM = """You are CodeAI, a careful code editor.
-You are given the current contents of a file and a description of the
-required change. Return the FULL new file contents only — no markdown
-fences, no commentary. If the file should be deleted, return the exact
-token <<<DELETE>>>. For new files, return the full new content.
-"""
-
-
-async def _edit_file_with_llm(
-    editing_model: str,
-    file_path: str,
-    current_content: str,
-    description: str,
-    task: str,
-) -> str:
-    messages = [
-        {"role": "system", "content": EDITING_SYSTEM},
-        {
-            "role": "user",
-            "content": (
-                f"Task: {task}\n\n"
-                f"File: {file_path}\n"
-                f"Required change: {description}\n\n"
-                f"Current content:\n{current_content}"
-            ),
-        },
-    ]
-    raw = await openrouter.chat_completion(
-        editing_model, messages, temperature=0.1
-    )
-    if raw.startswith("```"):
-        raw = re.sub(r"^```[^\n]*\n", "", raw)
-        raw = re.sub(r"\n```\s*$", "", raw)
-    return raw
-
-
-def _make_unified_diff(
-    rel_path: str, before: str, after: str
-) -> str:
-    return "".join(
-        difflib.unified_diff(
-            before.splitlines(keepends=True),
-            after.splitlines(keepends=True),
-            fromfile=f"a/{rel_path}",
-            tofile=f"b/{rel_path}",
-        )
-    )
-
-
-async def execute_plan(session_id: UUID) -> None:
-    """Запускается как background task после confirm_plan."""
-    async with AsyncSessionLocal() as db:
-        await _execute_plan_inner(db, session_id)
-
-
-async def _execute_plan_inner(db: AsyncSession, session_id: UUID) -> None:
-    session = await db.get(CodeAISession, session_id)
-    if session is None or session.plan is None:
-        return
-    project = await db.get(CodeAIProject, session.project_id)
-    if project is None:
-        return
-    user_settings = await db.scalar(
-        select(CodeAISettings).where(CodeAISettings.user_id == session.user_id)
-    )
-    editing_model = (
-        user_settings.editing_model
-        if user_settings
-        else settings.codeai_default_editing_model
-    )
-
-    plan = session.plan or {}
-    branch_name = plan.get("branch_name") or f"ai/session-{session.id.hex[:8]}"
-    pr_title = plan.get("pr_title") or session.task[:72]
-    pr_description = plan.get("pr_description") or session.task
-
-    workspace = Path(settings.codeai_workspace_dir) / str(session.id)
-
-    try:
-        await publish_event(session.id, {"type": "status", "message": "Запрашиваю installation token..."})
-        await _log_message(db, session.id, "Запрашиваю installation token...", CodeAIMessageType.STATUS)
-
-        install_token = await github_app.get_installation_token(
-            project.github_installation_id
-        )
-
-        await publish_event(session.id, {"type": "status", "message": f"Клонирую {project.repo_full_name}..."})
-        await _log_message(db, session.id, f"Клонирую {project.repo_full_name}...", CodeAIMessageType.STATUS)
-
-        repo_path = github_app.clone_repo(
-            project.repo_full_name, install_token, str(workspace)
-        )
-
-        await publish_event(session.id, {"type": "status", "message": f"Создаю ветку {branch_name}..."})
-        github_app.create_branch(repo_path, branch_name)
-
-        files_changed: list[str] = []
-        files_to_change = plan.get("files_to_change") or []
-
-        for entry in files_to_change:
-            rel_path = entry.get("path")
-            action = (entry.get("action") or "modify").lower()
-            description = entry.get("description") or ""
-            if not rel_path:
-                continue
-
-            full = Path(repo_path) / rel_path
-            await publish_event(
-                session.id,
-                {"type": "status", "message": f"{action}: {rel_path}"},
-            )
-            await _log_message(
-                db, session.id, f"{action}: {rel_path}", CodeAIMessageType.STATUS
-            )
-
-            if action == "delete":
-                if full.exists():
-                    try:
-                        before = full.read_text(encoding="utf-8", errors="replace")
-                    except OSError:
-                        before = ""
-                    full.unlink()
-                    files_changed.append(rel_path)
-                    diff = _make_unified_diff(rel_path, before, "")
-                    await publish_event(
-                        session.id,
-                        {
-                            "type": "diff",
-                            "path": rel_path,
-                            "action": action,
-                            "diff": diff,
-                        },
-                    )
-                    await _log_message(
-                        db,
-                        session.id,
-                        diff,
-                        CodeAIMessageType.DIFF,
-                        metadata={"path": rel_path, "action": action},
-                    )
-                continue
-
-            current = ""
-            if action == "modify" and full.exists():
-                try:
-                    current = full.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    current = ""
-
-            new_content = await _edit_file_with_llm(
-                editing_model, rel_path, current, description, session.task
-            )
-
-            if new_content.strip() == "<<<DELETE>>>":
-                if full.exists():
-                    full.unlink()
-                    files_changed.append(rel_path)
-                    diff = _make_unified_diff(rel_path, current, "")
-                    await publish_event(
-                        session.id,
-                        {
-                            "type": "diff",
-                            "path": rel_path,
-                            "action": "delete",
-                            "diff": diff,
-                        },
-                    )
-                    await _log_message(
-                        db,
-                        session.id,
-                        diff,
-                        CodeAIMessageType.DIFF,
-                        metadata={"path": rel_path, "action": "delete"},
-                    )
-                continue
-
-            full.parent.mkdir(parents=True, exist_ok=True)
-            full.write_text(new_content, encoding="utf-8")
-            files_changed.append(rel_path)
-
-            diff = _make_unified_diff(rel_path, current, new_content)
-            await publish_event(
-                session.id,
-                {
-                    "type": "diff",
-                    "path": rel_path,
-                    "action": action,
-                    "diff": diff,
-                },
-            )
-            await _log_message(
-                db,
-                session.id,
-                diff,
-                CodeAIMessageType.DIFF,
-                metadata={"path": rel_path, "action": action},
-            )
-
-        if not files_changed:
-            raise RuntimeError("No files were changed")
-
-        await publish_event(session.id, {"type": "status", "message": "Создаю коммит и пушу ветку..."})
-        await _log_message(db, session.id, "Создаю коммит и пушу ветку...", CodeAIMessageType.STATUS)
-
-        github_app.commit_and_push(
-            repo_path, files_changed, pr_title, branch_name
-        )
-
-        await publish_event(session.id, {"type": "status", "message": "Создаю Pull Request..."})
-        pr_url = await github_app.create_pull_request(
-            install_token,
-            project.repo_full_name,
-            branch_name,
-            project.repo_default_branch or "main",
-            pr_title,
-            pr_description,
-        )
-
-        session.pr_url = pr_url
-        session.branch_name = branch_name
-        session.status = CodeAISessionStatus.DONE
-        session.updated_at = datetime.now(timezone.utc)
-        await db.commit()
-
-        await _log_message(
-            db,
-            session.id,
-            f"Pull Request создан: {pr_url}",
-            CodeAIMessageType.STATUS,
-            metadata={"pr_url": pr_url},
-        )
-        await publish_event(
-            session.id,
-            {"type": "done", "pr_url": pr_url, "branch_name": branch_name},
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.exception("execute_plan failed for session %s", session_id)
-        session.status = CodeAISessionStatus.ERROR
-        await db.commit()
-        await _log_message(
-            db, session.id, f"Ошибка: {e}", CodeAIMessageType.STATUS
-        )
-        await publish_event(session.id, {"type": "error", "message": str(e)})
-    finally:
-        github_app.cleanup_workspace(str(workspace))
-
+# === Persistence helpers ===
 
 async def _log_message(
     db: AsyncSession,
@@ -469,13 +133,208 @@ async def _log_message(
     await db.commit()
 
 
-async def run_planning(session_id: UUID) -> None:
-    """Background task: planning после создания сессии."""
+# === Tool execution ===
+
+def _safe_relpath(repo_path: str, path: str) -> Path:
+    rel = (path or "").lstrip("/")
+    full = (Path(repo_path) / rel).resolve()
+    root = Path(repo_path).resolve()
+    if not str(full).startswith(str(root) + "/") and full != root:
+        raise ValueError(f"Path escapes repo root: {path}")
+    return full
+
+
+def _list_files(repo_path: str, sub: str | None = None) -> list[str]:
+    root = Path(repo_path)
+    base = root if not sub else (root / sub.lstrip("/")).resolve()
+    if not base.exists():
+        return []
+    out: list[str] = []
+    for p in base.rglob("*"):
+        if not p.is_file():
+            continue
+        rel_parts = p.relative_to(root).parts
+        if any(part in indexer.SKIP_DIRS for part in rel_parts):
+            continue
+        out.append(str(p.relative_to(root)))
+        if len(out) >= 2000:
+            break
+    out.sort()
+    return out
+
+
+def _make_unified_diff(rel_path: str, before: str, after: str) -> str:
+    return "".join(
+        difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=f"a/{rel_path}",
+            tofile=f"b/{rel_path}",
+        )
+    )
+
+
+class AgentState:
+    """Per-run mutable state — repo workspace, install token, edited files."""
+
+    def __init__(self, session: CodeAISession, project: CodeAIProject) -> None:
+        self.session = session
+        self.project = project
+        self.workspace = Path(settings.codeai_workspace_dir) / str(session.id)
+        self.repo_path: str | None = None
+        self.install_token: str | None = None
+        self.edited_files: list[str] = []
+        self.pr_url: str | None = None
+
+    async def ensure_repo(self) -> str:
+        if self.repo_path is not None:
+            return self.repo_path
+        self.install_token = await github_app.get_installation_token(
+            self.project.github_installation_id
+        )
+        self.repo_path = github_app.clone_repo(
+            self.project.repo_full_name,
+            self.install_token,
+            str(self.workspace),
+        )
+        return self.repo_path
+
+    def cleanup(self) -> None:
+        github_app.cleanup_workspace(str(self.workspace))
+
+
+async def _execute_tool(
+    db: AsyncSession,
+    state: AgentState,
+    tool_name: str,
+    args: dict[str, Any],
+) -> str:
+    session_id = state.session.id
+
+    if tool_name == "list_files":
+        repo_path = await state.ensure_repo()
+        files = _list_files(repo_path, args.get("path"))
+        return "\n".join(files) if files else "(no files)"
+
+    if tool_name == "read_file":
+        repo_path = await state.ensure_repo()
+        rel = args.get("path") or ""
+        full = _safe_relpath(repo_path, rel)
+        if not full.is_file():
+            return f"ERROR: file not found: {rel}"
+        max_bytes = settings.codeai_max_file_size_kb * 1024
+        if full.stat().st_size > max_bytes:
+            return f"ERROR: file too large (> {settings.codeai_max_file_size_kb} kB)"
+        return full.read_text(encoding="utf-8", errors="replace")
+
+    if tool_name == "edit_file":
+        repo_path = await state.ensure_repo()
+        rel = args.get("path") or ""
+        new_content = args.get("content") or ""
+        full = _safe_relpath(repo_path, rel)
+        before = ""
+        if full.is_file():
+            try:
+                before = full.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                before = ""
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(new_content, encoding="utf-8")
+        if rel not in state.edited_files:
+            state.edited_files.append(rel)
+        diff = _make_unified_diff(rel, before, new_content)
+        await publish_event(
+            session_id,
+            {
+                "type": "diff",
+                "path": rel,
+                "action": "create" if not before else "modify",
+                "diff": diff,
+            },
+        )
+        await _log_message(
+            db,
+            session_id,
+            diff,
+            CodeAIMessageType.DIFF,
+            metadata={
+                "path": rel,
+                "action": "create" if not before else "modify",
+            },
+        )
+        return f"OK: wrote {rel} ({len(new_content)} bytes)"
+
+    if tool_name == "delete_file":
+        repo_path = await state.ensure_repo()
+        rel = args.get("path") or ""
+        full = _safe_relpath(repo_path, rel)
+        if not full.is_file():
+            return f"ERROR: file not found: {rel}"
+        before = ""
+        try:
+            before = full.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            before = ""
+        full.unlink()
+        if rel not in state.edited_files:
+            state.edited_files.append(rel)
+        diff = _make_unified_diff(rel, before, "")
+        await publish_event(
+            session_id,
+            {"type": "diff", "path": rel, "action": "delete", "diff": diff},
+        )
+        await _log_message(
+            db,
+            session_id,
+            diff,
+            CodeAIMessageType.DIFF,
+            metadata={"path": rel, "action": "delete"},
+        )
+        return f"OK: deleted {rel}"
+
+    if tool_name == "create_pr":
+        repo_path = await state.ensure_repo()
+        if not state.edited_files:
+            return "ERROR: no files were changed yet — nothing to commit"
+        branch_name = args.get("branch_name") or f"ai/session-{state.session.id.hex[:8]}"
+        title = args.get("title") or state.session.task[:72]
+        body = args.get("description") or state.session.task
+
+        github_app.create_branch(repo_path, branch_name)
+        github_app.commit_and_push(
+            repo_path, state.edited_files, title, branch_name
+        )
+        pr_url = await github_app.create_pull_request(
+            state.install_token or "",
+            state.project.repo_full_name,
+            branch_name,
+            state.project.repo_default_branch or "main",
+            title,
+            body,
+        )
+        state.pr_url = pr_url
+        state.session.pr_url = pr_url
+        state.session.branch_name = branch_name
+        state.session.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        return f"OK: PR created: {pr_url}"
+
+    return f"ERROR: unknown tool {tool_name}"
+
+
+# === Agent loop ===
+
+MAX_ITERATIONS = 30
+
+
+async def run_agent(session_id: UUID) -> None:
+    """Background task: drive the conversational loop until the agent
+    produces a final text reply (no tool calls)."""
     async with AsyncSessionLocal() as db:
-        await _run_planning_inner(db, session_id)
+        await _run_agent_inner(db, session_id)
 
 
-async def _run_planning_inner(db: AsyncSession, session_id: UUID) -> None:
+async def _run_agent_inner(db: AsyncSession, session_id: UUID) -> None:
     session = await db.get(CodeAISession, session_id)
     if session is None:
         return
@@ -486,91 +345,146 @@ async def _run_planning_inner(db: AsyncSession, session_id: UUID) -> None:
     user_settings = await db.scalar(
         select(CodeAISettings).where(CodeAISettings.user_id == session.user_id)
     )
-    planning_model = (
-        user_settings.planning_model
+    model = (
+        user_settings.model
         if user_settings
         else settings.codeai_default_planning_model
     )
 
-    workspace = Path(settings.codeai_workspace_dir) / f"plan-{session.id}"
+    system_prompt = SYSTEM_PROMPT.format(
+        repo_full_name=project.repo_full_name,
+        default_branch=project.repo_default_branch or "main",
+    )
+
+    history = await _load_history(db, session_id)
+    msgs = _build_llm_history(history, system_prompt)
+    openai_tools = tools.openai_tools()
+
+    state = AgentState(session, project)
 
     try:
-        session.status = CodeAISessionStatus.PLANNING
+        session.status = CodeAISessionStatus.EXECUTING
         await db.commit()
 
-        await publish_event(
-            session.id,
-            {"type": "status", "message": "Клонирую репозиторий..."},
-        )
-        await _log_message(
-            db, session.id, "Клонирую репозиторий...", CodeAIMessageType.STATUS
-        )
+        for iteration in range(MAX_ITERATIONS):
+            # Refresh status to detect cancel.
+            await db.refresh(session)
+            if session.status == CodeAISessionStatus.ERROR:
+                await publish_event(
+                    session_id,
+                    {"type": "status", "message": "Сессия отменена"},
+                )
+                return
 
-        install_token = await github_app.get_installation_token(
-            project.github_installation_id
-        )
-        repo_path = github_app.clone_repo(
-            project.repo_full_name, install_token, str(workspace)
-        )
+            await publish_event(
+                session_id, {"type": "status", "message": "Агент думает..."}
+            )
 
-        await publish_event(
-            session.id,
-            {"type": "status", "message": "Собираю список файлов..."},
-        )
-        file_list = collect_repo_structure(repo_path)
+            message = await openrouter.chat_completion_message(
+                model, msgs, tools=openai_tools
+            )
+            content = message.get("content") or ""
+            tool_calls = message.get("tool_calls") or []
 
-        await publish_event(
-            session.id,
-            {"type": "status", "message": "LLM выбирает релевантные файлы..."},
-        )
-        selected = await select_relevant_files(
-            session.task, file_list, planning_model
-        )
+            if not tool_calls:
+                final = content.strip() or "Готово."
+                await _log_message(
+                    db, session_id, final, CodeAIMessageType.CHAT
+                )
+                session.status = CodeAISessionStatus.DONE
+                session.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                await publish_event(
+                    session_id, {"type": "assistant", "content": final}
+                )
+                await publish_event(
+                    session_id,
+                    {
+                        "type": "done",
+                        "pr_url": state.pr_url,
+                        "branch_name": session.branch_name,
+                    },
+                )
+                return
 
-        await publish_event(
-            session.id,
-            {"type": "tool_read", "files": selected},
-        )
-        await _log_message(
-            db,
-            session.id,
-            "Читаю файлы: " + ", ".join(selected),
-            CodeAIMessageType.STATUS,
-            metadata={"tool": "read", "files": selected},
-        )
+            # Append assistant turn (with tool_calls) to in-memory msgs only.
+            msgs.append(
+                {
+                    "role": "assistant",
+                    "content": content or None,
+                    "tool_calls": tool_calls,
+                }
+            )
 
-        files_content = _read_files(repo_path, selected)
+            for tc in tool_calls:
+                tool_id = tc.get("id") or ""
+                fn = tc.get("function") or {}
+                tool_name = fn.get("name") or ""
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
 
-        await publish_event(
-            session.id, {"type": "status", "message": "Строю план..."}
-        )
-        plan = await build_plan(
-            session.task, files_content, file_list, planning_model
-        )
+                await publish_event(
+                    session_id,
+                    {
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "tool": tool_name,
+                        "input": args,
+                    },
+                )
+                await _log_message(
+                    db,
+                    session_id,
+                    json.dumps(args, ensure_ascii=False),
+                    CodeAIMessageType.TOOL_USE,
+                    metadata={"tool": tool_name, "input": args, "id": tool_id},
+                )
 
-        session.plan = plan
-        session.branch_name = plan.get("branch_name")
-        session.status = CodeAISessionStatus.AWAITING_CONFIRMATION
-        await db.commit()
+                try:
+                    result = await _execute_tool(db, state, tool_name, args)
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("Tool %s failed", tool_name)
+                    result = f"ERROR: {e}"
 
-        await _log_message(
-            db,
-            session.id,
-            plan.get("reasoning") or "План готов",
-            CodeAIMessageType.PLAN,
-            metadata=plan,
-        )
-        await publish_event(
-            session.id,
-            {"type": "plan", "plan": plan},
-        )
+                preview = result.splitlines()[:5]
+                preview_text = "\n".join(preview)
+                await publish_event(
+                    session_id,
+                    {
+                        "type": "tool_result",
+                        "id": tool_id,
+                        "tool": tool_name,
+                        "preview": preview_text[:500],
+                    },
+                )
+                await _log_message(
+                    db,
+                    session_id,
+                    result,
+                    CodeAIMessageType.TOOL_RESULT,
+                    metadata={"tool": tool_name, "id": tool_id},
+                )
+
+                msgs.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "content": result[:50_000],
+                    }
+                )
+
+        # Hit the iteration cap.
+        raise RuntimeError("agent: max iterations exceeded")
+
     except Exception as e:  # noqa: BLE001
-        logger.exception("planning failed for session %s", session_id)
+        logger.exception("agent loop failed for session %s", session_id)
         session.status = CodeAISessionStatus.ERROR
         await db.commit()
         await _log_message(
-            db, session.id, f"Ошибка планирования: {e}", CodeAIMessageType.STATUS
+            db, session_id, f"Ошибка: {e}", CodeAIMessageType.STATUS
         )
-        await publish_event(session.id, {"type": "error", "message": str(e)})
+        await publish_event(session_id, {"type": "error", "message": str(e)})
     finally:
-        github_app.cleanup_workspace(str(workspace))
+        state.cleanup()

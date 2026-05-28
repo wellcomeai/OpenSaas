@@ -46,6 +46,8 @@ class CodeAIMessageType(str, enum.Enum):
     PLAN = "plan"
     STATUS = "status"
     DIFF = "diff"
+    TOOL_USE = "tool_use"
+    TOOL_RESULT = "tool_result"
 
 
 class CodeAIProject(Base):
@@ -224,8 +226,7 @@ class CodeAISettings(Base):
         unique=True,
         index=True,
     )
-    planning_model: Mapped[str] = mapped_column(String(255), nullable=False)
-    editing_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

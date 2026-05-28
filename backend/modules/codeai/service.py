@@ -145,7 +145,30 @@ async def create_session(
     await db.commit()
     await db.refresh(session)
 
-    asyncio.create_task(agent.run_planning(session.id))
+    asyncio.create_task(agent.run_agent(session.id))
+    return session
+
+
+async def send_message(
+    db: AsyncSession, user: User, session_id: UUID, content: str
+) -> CodeAISession:
+    session = await get_session(db, user, session_id)
+    if session.status == CodeAISessionStatus.EXECUTING:
+        raise HTTPException(
+            status_code=409, detail="Agent is still running"
+        )
+    db.add(
+        CodeAIMessage(
+            session_id=session.id,
+            role="user",
+            content=content,
+            message_type="chat",
+        )
+    )
+    session.status = CodeAISessionStatus.EXECUTING
+    await db.commit()
+    await db.refresh(session)
+    asyncio.create_task(agent.run_agent(session.id))
     return session
 
 
@@ -182,24 +205,6 @@ async def get_messages(
             .order_by(CodeAIMessage.created_at.asc())
         )
     ).all()
-
-
-async def confirm_plan(
-    db: AsyncSession, user: User, session_id: UUID
-) -> CodeAISession:
-    session = await get_session(db, user, session_id)
-    if session.status != CodeAISessionStatus.AWAITING_CONFIRMATION:
-        raise HTTPException(
-            status_code=400, detail="Session is not awaiting confirmation"
-        )
-    if not session.plan:
-        raise HTTPException(status_code=400, detail="Session has no plan")
-    session.status = CodeAISessionStatus.EXECUTING
-    await db.commit()
-    await db.refresh(session)
-
-    asyncio.create_task(agent.execute_plan(session.id))
-    return session
 
 
 async def cancel_session(
@@ -372,8 +377,7 @@ async def get_or_create_settings(
     if obj is None:
         obj = CodeAISettings(
             user_id=user.id,
-            planning_model=settings.codeai_default_planning_model,
-            editing_model=settings.codeai_default_editing_model,
+            model=settings.codeai_default_planning_model,
         )
         db.add(obj)
         await db.commit()
@@ -385,10 +389,8 @@ async def update_settings(
     db: AsyncSession, user: User, payload: CodeAISettingsUpdate
 ) -> CodeAISettings:
     obj = await get_or_create_settings(db, user)
-    if payload.planning_model is not None:
-        obj.planning_model = payload.planning_model
-    if payload.editing_model is not None:
-        obj.editing_model = payload.editing_model
+    if payload.model is not None:
+        obj.model = payload.model
     await db.commit()
     await db.refresh(obj)
     return obj

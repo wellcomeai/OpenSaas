@@ -7,7 +7,13 @@ export type CodeAISessionStatus =
   | "error";
 
 export type CodeAIMessageRole = "user" | "assistant" | "system";
-export type CodeAIMessageType = "chat" | "plan" | "status" | "diff";
+export type CodeAIMessageType =
+  | "chat"
+  | "plan"
+  | "status"
+  | "diff"
+  | "tool_use"
+  | "tool_result";
 
 export interface CodeAIRepo {
   full_name: string;
@@ -21,16 +27,8 @@ export interface CodeAIProject {
   github_installation_id: string;
   repo_full_name: string;
   repo_default_branch: string;
-  is_indexed: boolean;
-  indexed_at: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface CodeAIProjectStatus {
-  is_indexed: boolean;
-  indexed_at: string | null;
-  chunks_count: number;
 }
 
 export interface CodeAIPlanFile {
@@ -82,11 +80,9 @@ export interface CodeAIModel {
 }
 
 export interface CodeAISettings {
-  planning_model: string;
-  editing_model: string;
+  model: string;
 }
 
 export interface CodeAISettingsUpdate {
-  planning_model?: string;
-  editing_model?: string;
+  model?: string;
 }

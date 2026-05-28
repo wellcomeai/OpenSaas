@@ -1,7 +1,6 @@
 """CodeAI: проекты, сессии, настройки моделей, GitHub webhooks."""
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -11,7 +10,6 @@ from uuid import UUID
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     Header,
     HTTPException,
@@ -25,8 +23,6 @@ from config import settings
 from database import get_db
 from dependencies import CurrentUser
 from modules.codeai import agent, service
-from modules.codeai.models import CodeAIProject
-from sqlalchemy import select
 from modules.codeai.schemas import (
     CodeAIMessagePublic,
     CodeAIModelPublic,
@@ -35,6 +31,7 @@ from modules.codeai.schemas import (
     CodeAIProjectStatus,
     CodeAIRepoPublic,
     CodeAISessionCreate,
+    CodeAISessionMessageCreate,
     CodeAISessionPublic,
     CodeAISettingsPublic,
     CodeAISettingsUpdate,
@@ -218,13 +215,14 @@ async def list_messages(
     return [CodeAIMessagePublic.model_validate(m) for m in items]
 
 
-@router.post("/sessions/{session_id}/confirm", response_model=CodeAISessionPublic)
-async def confirm_plan(
+@router.post("/sessions/{session_id}/message", response_model=CodeAISessionPublic)
+async def send_message(
     session_id: UUID,
+    payload: CodeAISessionMessageCreate,
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    obj = await service.confirm_plan(db, user, session_id)
+    obj = await service.send_message(db, user, session_id, payload.content)
     return CodeAISessionPublic.model_validate(obj)
 
 
@@ -299,42 +297,11 @@ def _verify_webhook_signature(body: bytes, signature: str | None) -> None:
 @router.post("/webhooks/github")
 async def github_webhook(
     request: Request,
-    background: BackgroundTasks,
-    db: Annotated[AsyncSession, Depends(get_db)],
     x_github_event: Annotated[str | None, Header()] = None,
     x_hub_signature_256: Annotated[str | None, Header()] = None,
 ):
     body = await request.body()
     _verify_webhook_signature(body, x_hub_signature_256)
-
-    try:
-        payload = json.loads(body or b"{}")
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-
-    event = (x_github_event or "").lower()
-    logger.info("GitHub webhook: event=%s", event)
-
-    if event == "installation":
-        # Installation создана / удалена — пока просто логируем
-        return {"ok": True}
-
-    if event == "push":
-        repo = (payload.get("repository") or {}).get("full_name")
-        if repo:
-            projects = (
-                await db.scalars(
-                    select(CodeAIProject).where(
-                        CodeAIProject.repo_full_name == repo
-                    )
-                )
-            ).all()
-            for project in projects:
-                background.add_task(
-                    service._run_indexing,
-                    project.id,
-                    project.repo_full_name,
-                    project.github_installation_id,
-                )
-
+    logger.info("GitHub webhook: event=%s", (x_github_event or "").lower())
+    # We accept and log; nothing to do — the agent reads the repo on demand.
     return {"ok": True}

@@ -3,7 +3,6 @@ import type {
   CodeAIMessage,
   CodeAIModel,
   CodeAIProject,
-  CodeAIProjectStatus,
   CodeAIRepo,
   CodeAISession,
   CodeAISettings,
@@ -43,15 +42,6 @@ export const codeaiApi = {
     await apiClient.delete(`/api/v1/codeai/projects/${id}`);
   },
 
-  async startIndexing(id: string): Promise<void> {
-    await apiClient.post(`/api/v1/codeai/projects/${id}/index`);
-  },
-
-  async getProjectStatus(id: string): Promise<CodeAIProjectStatus> {
-    const r = await apiClient.get(`/api/v1/codeai/projects/${id}/status`);
-    return r.data;
-  },
-
   async listProjectSessions(projectId: string): Promise<CodeAISession[]> {
     const r = await apiClient.get(
       `/api/v1/codeai/projects/${projectId}/sessions`,
@@ -78,9 +68,13 @@ export const codeaiApi = {
     return r.data;
   },
 
-  async confirmPlan(sessionId: string): Promise<CodeAISession> {
+  async sendMessage(
+    sessionId: string,
+    content: string,
+  ): Promise<CodeAISession> {
     const r = await apiClient.post(
-      `/api/v1/codeai/sessions/${sessionId}/confirm`,
+      `/api/v1/codeai/sessions/${sessionId}/message`,
+      { content },
     );
     return r.data;
   },

@@ -102,12 +102,16 @@ class CodeAIModelPublic(BaseModel):
 
 
 class CodeAISettingsPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
-    planning_model: str
-    editing_model: str
+    model: str
 
 
 class CodeAISettingsUpdate(BaseModel):
-    planning_model: str | None = None
-    editing_model: str | None = None
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: str | None = None
+
+
+class CodeAISessionMessageCreate(BaseModel):
+    content: str = Field(min_length=1)

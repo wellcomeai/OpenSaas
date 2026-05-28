@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowRight, Github, Plus, Settings as SettingsIcon, Trash2 } from "lucide-react";
+import { ArrowRight, Github, Plus, Trash2 } from "lucide-react";
 import { useSearchParams, useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +21,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { codeaiApi } from "@/api/codeai";
-import { formatDateTime } from "@/lib/utils";
 
 export default function CodeAIProjectsPage() {
   const qc = useQueryClient();
@@ -71,31 +69,15 @@ export default function CodeAIProjectsPage() {
     },
   });
 
-  const indexMut = useMutation({
-    mutationFn: (id: string) => codeaiApi.startIndexing(id),
-    onSuccess: () => {
-      toast.success("Индексация запущена");
-      qc.invalidateQueries({ queryKey: ["codeai-projects"] });
-    },
-  });
-
   const hasInstallationUrl = Boolean(installUrl);
 
   return (
     <>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">CodeAI</h1>
-          <p className="text-sm text-muted-foreground">
-            AI-агент для работы с GitHub репозиториями.
-          </p>
-        </div>
-        <Link href="/codeai/settings">
-          <Button variant="outline" size="sm">
-            <SettingsIcon className="mr-2 h-4 w-4" />
-            Настройки
-          </Button>
-        </Link>
+      <div>
+        <h1 className="text-3xl font-bold">CodeAI</h1>
+        <p className="text-sm text-muted-foreground">
+          AI-агент для работы с GitHub репозиториями.
+        </p>
       </div>
 
       {(!projects || projects.length === 0) && !isLoading && (
@@ -153,34 +135,12 @@ export default function CodeAIProjectsPage() {
                 className="flex items-center justify-between rounded-lg border p-3"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-medium">
-                      {p.repo_full_name}
-                    </span>
-                    {p.is_indexed ? (
-                      <Badge variant="success">indexed</Badge>
-                    ) : (
-                      <Badge variant="warning">not indexed</Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {p.indexed_at
-                      ? `Проиндексировано: ${formatDateTime(p.indexed_at)}`
-                      : "Ещё не проиндексировано"}
-                  </p>
+                  <span className="font-mono text-sm font-medium">
+                    {p.repo_full_name}
+                  </span>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {!p.is_indexed && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => indexMut.mutate(p.id)}
-                      disabled={indexMut.isPending}
-                    >
-                      Индексировать
-                    </Button>
-                  )}
                   <Link href={`/codeai/${p.id}`}>
                     <Button size="sm">
                       Открыть

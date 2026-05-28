@@ -89,6 +89,36 @@ async def chat_completion(
     return choices[0]["message"]["content"] or ""
 
 
+async def chat_completion_message(
+    model_id: str,
+    messages: list[dict[str, Any]],
+    *,
+    temperature: float = 0.2,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Returns the full assistant `message` dict (content + tool_calls)."""
+    payload: dict[str, Any] = {
+        "model": model_id,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if tools:
+        payload["tools"] = tools
+
+    async with httpx.AsyncClient(timeout=180) as client:
+        r = await client.post(
+            f"{OPENROUTER_BASE}/chat/completions",
+            headers=_headers(),
+            json=payload,
+        )
+        r.raise_for_status()
+        data = r.json()
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"OpenRouter returned no choices: {data}")
+    return choices[0].get("message") or {}
+
+
 async def get_embedding(text: str, *, model: str | None = None) -> list[float]:
     """Embedding через OpenRouter (совместимый с OpenAI endpoint)."""
     model_id = model or settings.codeai_embeddings_model

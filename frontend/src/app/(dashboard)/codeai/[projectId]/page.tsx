@@ -10,14 +10,12 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Circle,
   ExternalLink,
   FileCode,
-  FileText,
-  GitBranch,
   Loader2,
   Plus,
   Send,
+  Terminal,
   XCircle,
 } from "lucide-react";
 
@@ -29,27 +27,10 @@ import { cn, formatDateTime } from "@/lib/utils";
 import { useSessionStream } from "@/hooks/useSessionStream";
 import type {
   CodeAIMessage,
-  CodeAIPlan,
+  CodeAIModel,
+  CodeAISession,
   CodeAISessionStatus,
 } from "@/types/codeai";
-
-interface AgentBlock {
-  key: string;
-  kind: "status" | "tool_read" | "diff" | "plan" | "done" | "error";
-  // status
-  message?: string;
-  state?: "running" | "ok" | "error";
-  // tool_read
-  files?: string[];
-  // diff
-  path?: string;
-  action?: string;
-  diff?: string;
-  // plan
-  plan?: CodeAIPlan;
-  // done
-  pr_url?: string;
-}
 
 export default function CodeAIProjectChatPage() {
   const params = useParams<{ projectId: string }>();
@@ -57,18 +38,12 @@ export default function CodeAIProjectChatPage() {
   const qc = useQueryClient();
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [newTask, setNewTask] = useState("");
 
   const { data: projects } = useQuery({
     queryKey: ["codeai-projects"],
     queryFn: () => codeaiApi.listProjects(),
   });
   const project = projects?.find((p) => p.id === projectId);
-
-  const { data: settings } = useQuery({
-    queryKey: ["codeai-settings"],
-    queryFn: () => codeaiApi.getSettings(),
-  });
 
   const { data: sessions } = useQuery({
     queryKey: ["codeai-sessions", projectId],
@@ -83,20 +58,8 @@ export default function CodeAIProjectChatPage() {
     }
   }, [sessions, activeSessionId]);
 
-  const createMut = useMutation({
-    mutationFn: (task: string) =>
-      codeaiApi.createSession({ project_id: projectId, task }),
-    onSuccess: (s) => {
-      setActiveSessionId(s.id);
-      setNewTask("");
-      qc.invalidateQueries({ queryKey: ["codeai-sessions", projectId] });
-    },
-    onError: () => toast.error("Не удалось создать сессию"),
-  });
-
   return (
-    <div className="-m-6 grid h-[calc(100vh-3.5rem)] grid-cols-[220px_1fr]">
-      {/* Left panel */}
+    <div className="-m-6 grid h-[calc(100vh-3.5rem)] grid-cols-[240px_1fr]">
       <aside className="flex flex-col overflow-y-auto border-r bg-muted/20 p-4">
         <Link
           href="/codeai"
@@ -105,38 +68,26 @@ export default function CodeAIProjectChatPage() {
           <ArrowLeft className="mr-1 h-4 w-4" /> Назад
         </Link>
 
-        <div className="mb-4">
+        <div className="mb-3">
           <div className="font-mono text-sm font-medium">
             {project?.repo_full_name ?? "..."}
           </div>
         </div>
 
-        <div className="mb-4 text-xs text-muted-foreground">
-          <div className="mb-1 font-semibold uppercase tracking-wider">
-            Модели
-          </div>
-          <div>Plan: {settings?.planning_model ?? "—"}</div>
-          <div>Edit: {settings?.editing_model ?? "—"}</div>
-          <Link
-            href="/codeai/settings"
-            className="text-primary hover:underline"
-          >
-            Изменить →
-          </Link>
-        </div>
+        <ModelSelector />
 
-        <div className="my-2 border-t" />
+        <div className="my-3 border-t" />
 
-        <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => setActiveSessionId(null)}
+          className="mb-3 inline-flex items-center justify-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs hover:bg-muted"
+        >
+          <Plus className="h-3.5 w-3.5" /> Новая задача
+        </button>
+
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Сессии
-          <button
-            type="button"
-            onClick={() => setActiveSessionId(null)}
-            className="rounded p-1 hover:bg-muted"
-            title="Новая задача"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
         </div>
         <div className="flex flex-col gap-1">
           {sessions?.map((s) => (
@@ -161,21 +112,17 @@ export default function CodeAIProjectChatPage() {
         </div>
       </aside>
 
-      {/* Center chat area */}
       <section className="flex flex-col overflow-hidden">
         {activeSessionId ? (
           <SessionView
+            key={activeSessionId}
             sessionId={activeSessionId}
             projectId={projectId}
           />
         ) : (
           <NewTaskView
-            task={newTask}
-            onChange={setNewTask}
-            onSubmit={() => {
-              if (newTask.trim()) createMut.mutate(newTask.trim());
-            }}
-            isPending={createMut.isPending}
+            projectId={projectId}
+            onCreated={(id) => setActiveSessionId(id)}
           />
         )}
       </section>
@@ -186,14 +133,14 @@ export default function CodeAIProjectChatPage() {
 function StatusBadge({ status }: { status: CodeAISessionStatus }) {
   const map: Record<CodeAISessionStatus, { label: string; cls: string }> = {
     idle: { label: "idle", cls: "bg-muted text-muted-foreground" },
-    planning: { label: "planning", cls: "bg-yellow-100 text-yellow-800" },
+    planning: { label: "думает", cls: "bg-blue-100 text-blue-800" },
     awaiting_confirmation: {
       label: "ждёт",
       cls: "bg-blue-100 text-blue-800",
     },
-    executing: { label: "выполняется", cls: "bg-blue-100 text-blue-800" },
-    done: { label: "done", cls: "bg-green-100 text-green-800" },
-    error: { label: "error", cls: "bg-red-100 text-red-800" },
+    executing: { label: "работает", cls: "bg-blue-100 text-blue-800" },
+    done: { label: "готово", cls: "bg-green-100 text-green-800" },
+    error: { label: "ошибка", cls: "bg-red-100 text-red-800" },
   };
   const v = map[status];
   return (
@@ -203,48 +150,109 @@ function StatusBadge({ status }: { status: CodeAISessionStatus }) {
   );
 }
 
+function ModelSelector() {
+  const qc = useQueryClient();
+  const { data: settings } = useQuery({
+    queryKey: ["codeai-settings"],
+    queryFn: () => codeaiApi.getSettings(),
+  });
+  const { data: models } = useQuery({
+    queryKey: ["codeai-models"],
+    queryFn: () => codeaiApi.getAvailableModels(),
+  });
+
+  const updateMut = useMutation({
+    mutationFn: (model: string) => codeaiApi.updateSettings({ model }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["codeai-settings"] });
+    },
+    onError: () => toast.error("Не удалось сменить модель"),
+  });
+
+  const opts = useMemo<CodeAIModel[]>(() => {
+    if (!models) return [];
+    return [...models].sort((a, b) => a.id.localeCompare(b.id));
+  }, [models]);
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Модель
+      </label>
+      <select
+        className="w-full rounded-md border bg-background px-2 py-1.5 text-xs font-mono"
+        value={settings?.model ?? ""}
+        onChange={(e) => updateMut.mutate(e.target.value)}
+        disabled={!settings || updateMut.isPending}
+      >
+        {!settings && <option>...</option>}
+        {settings &&
+          !opts.find((m) => m.id === settings.model) && (
+            <option value={settings.model}>{settings.model}</option>
+          )}
+        {opts.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.id}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function NewTaskView({
-  task,
-  onChange,
-  onSubmit,
-  isPending,
+  projectId,
+  onCreated,
 }: {
-  task: string;
-  onChange: (v: string) => void;
-  onSubmit: () => void;
-  isPending: boolean;
+  projectId: string;
+  onCreated: (sessionId: string) => void;
 }) {
+  const qc = useQueryClient();
+  const [task, setTask] = useState("");
+
+  const createMut = useMutation({
+    mutationFn: (text: string) =>
+      codeaiApi.createSession({ project_id: projectId, task: text }),
+    onSuccess: (s) => {
+      onCreated(s.id);
+      qc.invalidateQueries({ queryKey: ["codeai-sessions", projectId] });
+    },
+    onError: () => toast.error("Не удалось создать сессию"),
+  });
+
   return (
     <div className="flex h-full flex-col items-center justify-center p-8">
       <div className="w-full max-w-2xl space-y-4">
         <div>
           <h2 className="text-xl font-semibold">Новая задача</h2>
           <p className="text-sm text-muted-foreground">
-            Опишите что нужно изменить в репозитории. CodeAI составит план и
-            покажет его на подтверждение перед коммитом.
+            Напиши что нужно сделать — задать вопрос, починить баг, добавить
+            фичу. Агент сам решит, читать ли код.
           </p>
         </div>
         <Textarea
           rows={5}
           value={task}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Например: Добавь Google OAuth авторизацию"
+          onChange={(e) => setTask(e.target.value)}
+          placeholder="Например: добавь Google OAuth"
         />
         <Button
-          onClick={onSubmit}
-          disabled={!task.trim() || isPending}
+          onClick={() => task.trim() && createMut.mutate(task.trim())}
+          disabled={!task.trim() || createMut.isPending}
         >
-          {isPending ? (
+          {createMut.isPending ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
             <Send className="mr-2 h-4 w-4" />
           )}
-          Создать задачу
+          Отправить
         </Button>
       </div>
     </div>
   );
 }
+
+// === Session view ===
 
 function SessionView({
   sessionId,
@@ -267,30 +275,24 @@ function SessionView({
     refetchInterval: 3000,
   });
 
-  const stream = useSessionStream(
-    session &&
-      (session.status === "planning" || session.status === "executing")
-      ? sessionId
-      : null,
-  );
+  const isRunning =
+    session?.status === "planning" || session?.status === "executing";
+
+  const stream = useSessionStream(isRunning ? sessionId : null);
 
   useEffect(() => {
     if (stream.events.length === 0) return;
     const last = stream.events[stream.events.length - 1];
-    if (last.type === "done" || last.type === "error" || last.type === "plan") {
+    if (
+      last.type === "done" ||
+      last.type === "error" ||
+      last.type === "assistant"
+    ) {
       qc.invalidateQueries({ queryKey: ["codeai-session", sessionId] });
       qc.invalidateQueries({ queryKey: ["codeai-messages", sessionId] });
       qc.invalidateQueries({ queryKey: ["codeai-sessions", projectId] });
     }
   }, [stream.events, qc, sessionId, projectId]);
-
-  const confirmMut = useMutation({
-    mutationFn: () => codeaiApi.confirmPlan(sessionId),
-    onSuccess: () => {
-      toast.success("План подтверждён");
-      qc.invalidateQueries({ queryKey: ["codeai-session", sessionId] });
-    },
-  });
 
   const cancelMut = useMutation({
     mutationFn: () => codeaiApi.cancelSession(sessionId),
@@ -300,163 +302,193 @@ function SessionView({
     },
   });
 
-  const blocks = useMemo<AgentBlock[]>(() => {
-    return buildAgentBlocks(
-      messages ?? [],
-      stream.events as StreamEvent[],
-      session?.plan ?? null,
-      session?.status ?? "idle",
-      session?.pr_url ?? null,
-    );
-  }, [messages, stream.events, session?.plan, session?.status, session?.pr_url]);
+  const sendMut = useMutation({
+    mutationFn: (content: string) => codeaiApi.sendMessage(sessionId, content),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["codeai-session", sessionId] });
+      qc.invalidateQueries({ queryKey: ["codeai-messages", sessionId] });
+    },
+    onError: () => toast.error("Не удалось отправить сообщение"),
+  });
+
+  const blocks = useMemo(
+    () =>
+      buildBlocks(messages ?? [], stream.events as StreamEvent[], session ?? null),
+    [messages, stream.events, session],
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [blocks]);
 
+  const [input, setInput] = useState("");
+
   if (!session) {
     return <div className="p-6 text-sm text-muted-foreground">Загрузка...</div>;
   }
 
+  const send = () => {
+    const text = input.trim();
+    if (!text || isRunning) return;
+    sendMut.mutate(text);
+    setInput("");
+  };
+
   return (
     <div className="flex h-full flex-col">
-      {/* Timeline */}
-      <div className="flex items-center gap-4 border-b p-4 text-xs">
-        <TimelineStep
-          label="Анализ"
-          active={session.status === "planning"}
-          done={["awaiting_confirmation", "executing", "done"].includes(session.status)}
-        />
-        <TimelineStep
-          label="Подтверждение"
-          active={session.status === "awaiting_confirmation"}
-          done={["executing", "done"].includes(session.status)}
-        />
-        <TimelineStep
-          label="Выполнение"
-          active={session.status === "executing"}
-          done={session.status === "done"}
-        />
-        <TimelineStep label="Готово" active={false} done={session.status === "done"} />
-      </div>
-
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-6">
-        <UserBubble text={session.task} />
-
         {blocks.map((b) => (
-          <AgentBlockView
-            key={b.key}
-            block={b}
-            onConfirm={() => confirmMut.mutate()}
-            onCancel={() => cancelMut.mutate()}
-            isPlanPending={confirmMut.isPending || cancelMut.isPending}
-            isPlanActive={session.status === "awaiting_confirmation"}
-          />
+          <BlockView key={b.key} block={b} />
         ))}
 
-        {session.status === "error" && (
-          <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+        {session.status === "error" && !isRunning && (
+          <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
             <div className="flex items-center gap-2 font-semibold">
-              <XCircle className="h-5 w-5" /> Ошибка при выполнении задачи
+              <XCircle className="h-4 w-4" /> Ошибка
             </div>
           </div>
         )}
       </div>
-    </div>
-  );
-}
 
-function TimelineStep({
-  label,
-  active,
-  done,
-}: {
-  label: string;
-  active: boolean;
-  done: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      {done ? (
-        <CheckCircle2 className="h-4 w-4 text-green-600" />
-      ) : active ? (
-        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-      ) : (
-        <Circle className="h-4 w-4 text-muted-foreground" />
-      )}
-      <span
-        className={cn(
-          done
-            ? "text-green-700"
-            : active
-              ? "text-blue-700"
-              : "text-muted-foreground",
+      <div className="border-t bg-background p-3">
+        {isRunning && (
+          <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              агент думает...
+            </span>
+            <button
+              type="button"
+              onClick={() => cancelMut.mutate()}
+              className="text-xs text-red-600 hover:underline"
+              disabled={cancelMut.isPending}
+            >
+              Остановить
+            </button>
+          </div>
         )}
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function UserBubble({ text }: { text: string }) {
-  return (
-    <div className="flex justify-end">
-      <div className="max-w-[80%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
-        {text}
+        <div className="flex items-end gap-2">
+          <Textarea
+            rows={2}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Напиши задачу или вопрос..."
+            disabled={isRunning || sendMut.isPending}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            className="resize-none"
+          />
+          <Button
+            onClick={send}
+            disabled={!input.trim() || isRunning || sendMut.isPending}
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   );
 }
 
-// === AgentBlock ===
+// === Block model ===
 
 interface StreamEvent {
   type: string;
   message?: string;
-  files?: string[];
+  id?: string;
+  tool?: string;
+  input?: Record<string, unknown>;
+  preview?: string;
   path?: string;
   action?: string;
   diff?: string;
-  plan?: CodeAIPlan;
+  content?: string;
   pr_url?: string;
   branch_name?: string;
 }
 
-function buildAgentBlocks(
+interface AgentBlock {
+  key: string;
+  kind: "user" | "assistant" | "tool" | "diff" | "done" | "thinking";
+  // user / assistant
+  text?: string;
+  // tool
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  toolResultPreview?: string;
+  toolDone?: boolean;
+  // diff
+  path?: string;
+  action?: string;
+  diff?: string;
+  // done
+  prUrl?: string;
+  branchName?: string;
+}
+
+function buildBlocks(
   messages: CodeAIMessage[],
   events: StreamEvent[],
-  plan: CodeAIPlan | null,
-  status: CodeAISessionStatus,
-  prUrl: string | null,
+  session: CodeAISession | null,
 ): AgentBlock[] {
   const blocks: AgentBlock[] = [];
 
+  // Track in-flight tool calls so we can collapse tool_use + tool_result.
+  const toolMap = new Map<string, number>(); // tool id -> blocks index
+
   for (const m of messages) {
-    if (m.role === "user") continue;
-    if (m.message_type === "status") {
-      const meta = (m.metadata ?? {}) as Record<string, unknown>;
-      if (meta.tool === "read" && Array.isArray(meta.files)) {
-        blocks.push({
-          key: `msg-${m.id}`,
-          kind: "tool_read",
-          files: meta.files as string[],
-        });
-        continue;
+    if (m.role === "user") {
+      blocks.push({ key: `m-${m.id}`, kind: "user", text: m.content });
+      continue;
+    }
+    if (m.message_type === "chat") {
+      if (m.content.trim()) {
+        blocks.push({ key: `m-${m.id}`, kind: "assistant", text: m.content });
       }
-      blocks.push({
-        key: `msg-${m.id}`,
-        kind: "status",
-        message: m.content,
-        state: "ok",
-      });
+      continue;
+    }
+    if (m.message_type === "tool_use") {
+      const meta = (m.metadata ?? {}) as Record<string, unknown>;
+      const idx = blocks.push({
+        key: `m-${m.id}`,
+        kind: "tool",
+        toolName: (meta.tool as string) ?? "",
+        toolInput: (meta.input as Record<string, unknown>) ?? {},
+        toolDone: false,
+      }) - 1;
+      if (typeof meta.id === "string" && meta.id) {
+        toolMap.set(meta.id, idx);
+      }
+      continue;
+    }
+    if (m.message_type === "tool_result") {
+      const meta = (m.metadata ?? {}) as Record<string, unknown>;
+      const id = (meta.id as string) ?? "";
+      const idx = id ? toolMap.get(id) : undefined;
+      if (idx !== undefined) {
+        const b = blocks[idx];
+        b.toolDone = true;
+        b.toolResultPreview = m.content.split("\n").slice(0, 5).join("\n");
+      } else {
+        blocks.push({
+          key: `m-${m.id}`,
+          kind: "tool",
+          toolName: (meta.tool as string) ?? "",
+          toolDone: true,
+          toolResultPreview: m.content.split("\n").slice(0, 5).join("\n"),
+        });
+      }
       continue;
     }
     if (m.message_type === "diff") {
       const meta = (m.metadata ?? {}) as Record<string, unknown>;
       blocks.push({
-        key: `msg-${m.id}`,
+        key: `m-${m.id}`,
         kind: "diff",
         path: (meta.path as string) ?? "",
         action: (meta.action as string) ?? "modify",
@@ -464,95 +496,88 @@ function buildAgentBlocks(
       });
       continue;
     }
-    if (m.message_type === "plan") {
-      // Plan card is rendered from session.plan below when relevant.
-      continue;
-    }
+    // status / plan messages — skip
   }
 
-  // Append live stream events that aren't already captured in persisted messages.
+  // Overlay live stream events (events not yet persisted).
+  const streamToolMap = new Map<string, number>();
   for (let i = 0; i < events.length; i++) {
     const e = events[i];
-    const key = `ev-${i}`;
-    if (e.type === "status") {
+    if (e.type === "tool_use") {
+      const idx = blocks.push({
+        key: `e-${i}`,
+        kind: "tool",
+        toolName: e.tool,
+        toolInput: e.input,
+        toolDone: false,
+      }) - 1;
+      if (e.id) streamToolMap.set(e.id, idx);
+      continue;
+    }
+    if (e.type === "tool_result") {
+      const idx = e.id ? streamToolMap.get(e.id) : undefined;
+      if (idx !== undefined) {
+        const b = blocks[idx];
+        b.toolDone = true;
+        b.toolResultPreview = e.preview ?? "";
+      } else {
+        blocks.push({
+          key: `e-${i}`,
+          kind: "tool",
+          toolName: e.tool,
+          toolDone: true,
+          toolResultPreview: e.preview ?? "",
+        });
+      }
+      continue;
+    }
+    if (e.type === "diff") {
       blocks.push({
-        key,
-        kind: "status",
-        message: e.message,
-        state: "running",
-      });
-    } else if (e.type === "tool_read") {
-      blocks.push({
-        key,
-        kind: "tool_read",
-        files: e.files ?? [],
-      });
-    } else if (e.type === "diff") {
-      blocks.push({
-        key,
+        key: `e-${i}`,
         kind: "diff",
         path: e.path,
         action: e.action,
         diff: e.diff,
       });
-    } else if (e.type === "error") {
-      blocks.push({
-        key,
-        kind: "status",
-        message: e.message ?? "error",
-        state: "error",
-      });
+      continue;
     }
+    if (e.type === "assistant") {
+      blocks.push({ key: `e-${i}`, kind: "assistant", text: e.content });
+      continue;
+    }
+    // status events: not rendered (the input area shows "агент думает...")
   }
 
-  // Mark in-flight statuses: only the last status block in a running session keeps "running".
-  if (status !== "planning" && status !== "executing") {
-    for (const b of blocks) {
-      if (b.kind === "status" && b.state === "running") b.state = "ok";
-    }
-  } else {
-    const runningIdxs = blocks
-      .map((b, i) => (b.kind === "status" && b.state === "running" ? i : -1))
-      .filter((i) => i >= 0);
-    for (let i = 0; i < runningIdxs.length - 1; i++) {
-      blocks[runningIdxs[i]].state = "ok";
-    }
-  }
-
-  if (
-    plan &&
-    (status === "awaiting_confirmation" ||
-      status === "executing" ||
-      status === "done")
-  ) {
-    blocks.push({ key: "plan", kind: "plan", plan });
-  }
-
-  if (status === "done" && prUrl) {
-    blocks.push({ key: "done", kind: "done", pr_url: prUrl });
+  // PR success block.
+  if (session?.status === "done" && session.pr_url) {
+    blocks.push({
+      key: "done",
+      kind: "done",
+      prUrl: session.pr_url,
+      branchName: session.branch_name ?? undefined,
+    });
   }
 
   return blocks;
 }
 
-function AgentBlockView({
-  block,
-  onConfirm,
-  onCancel,
-  isPlanPending,
-  isPlanActive,
-}: {
-  block: AgentBlock;
-  onConfirm: () => void;
-  onCancel: () => void;
-  isPlanPending: boolean;
-  isPlanActive: boolean;
-}) {
+// === Block views ===
+
+function BlockView({ block }: { block: AgentBlock }) {
   switch (block.kind) {
-    case "status":
-      return <StatusBlock message={block.message ?? ""} state={block.state ?? "ok"} />;
-    case "tool_read":
-      return <ToolReadBlock files={block.files ?? []} />;
+    case "user":
+      return <UserBubble text={block.text ?? ""} />;
+    case "assistant":
+      return <AssistantText text={block.text ?? ""} />;
+    case "tool":
+      return (
+        <ToolBlock
+          name={block.toolName ?? ""}
+          input={block.toolInput ?? {}}
+          done={block.toolDone ?? false}
+          preview={block.toolResultPreview}
+        />
+      );
     case "diff":
       return (
         <DiffBlock
@@ -561,49 +586,32 @@ function AgentBlockView({
           diff={block.diff ?? ""}
         />
       );
-    case "plan":
-      return block.plan ? (
-        <PlanBlock
-          plan={block.plan}
-          onConfirm={onConfirm}
-          onCancel={onCancel}
-          isPending={isPlanPending}
-          isActive={isPlanActive}
-        />
-      ) : null;
     case "done":
-      return <DoneBlock prUrl={block.pr_url ?? ""} />;
+      return (
+        <DoneBlock
+          prUrl={block.prUrl ?? ""}
+          branchName={block.branchName}
+        />
+      );
     default:
       return null;
   }
 }
 
-function StatusBlock({
-  message,
-  state,
-}: {
-  message: string;
-  state: "running" | "ok" | "error";
-}) {
+function UserBubble({ text }: { text: string }) {
   return (
-    <div className="flex items-start gap-2 text-sm">
-      {state === "running" && (
-        <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-blue-500" />
-      )}
-      {state === "ok" && (
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
-      )}
-      {state === "error" && (
-        <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-      )}
-      <span
-        className={cn(
-          "leading-5",
-          state === "error" ? "text-red-700" : "text-foreground",
-        )}
-      >
-        {message}
-      </span>
+    <div className="flex justify-end">
+      <div className="max-w-[80%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function AssistantText({ text }: { text: string }) {
+  return (
+    <div className="max-w-[85%] whitespace-pre-wrap text-sm leading-6">
+      {text}
     </div>
   );
 }
@@ -637,28 +645,62 @@ function Collapsible({
   );
 }
 
-function ToolReadBlock({ files }: { files: string[] }) {
+function ToolBlock({
+  name,
+  input,
+  done,
+  preview,
+}: {
+  name: string;
+  input: Record<string, unknown>;
+  done: boolean;
+  preview?: string;
+}) {
+  const subtitle = useMemo(() => {
+    if (typeof input.path === "string") return input.path;
+    if (typeof input.branch_name === "string") return input.branch_name;
+    return Object.keys(input).length > 0 ? JSON.stringify(input) : "";
+  }, [input]);
+
   return (
     <Collapsible
       defaultOpen={false}
       header={
         <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4 text-muted-foreground" />
-          <span className="font-medium">Читаю файлы</span>
-          <span className="text-xs text-muted-foreground">
-            ({files.length})
+          <Terminal className="h-4 w-4 text-muted-foreground" />
+          <span className="font-mono text-xs font-medium">{name}</span>
+          {subtitle && (
+            <span className="truncate font-mono text-xs text-muted-foreground">
+              {subtitle}
+            </span>
+          )}
+          <span className="ml-auto">
+            {done ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+            ) : (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+            )}
           </span>
         </div>
       }
     >
-      <ul className="space-y-1 p-3 text-xs">
-        {files.map((f) => (
-          <li key={f} className="flex items-center gap-1.5 font-mono">
-            <FileCode className="h-3 w-3 text-muted-foreground" />
-            {f}
-          </li>
-        ))}
-      </ul>
+      <div className="space-y-2 p-3 text-xs">
+        {Object.keys(input).length > 0 && (
+          <pre className="overflow-auto rounded bg-muted p-2 font-mono">
+            {JSON.stringify(input, null, 2)}
+          </pre>
+        )}
+        {done && preview && (
+          <div>
+            <div className="mb-1 text-[10px] uppercase text-muted-foreground">
+              Результат
+            </div>
+            <pre className="overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono">
+              {preview}
+            </pre>
+          </div>
+        )}
+      </div>
     </Collapsible>
   );
 }
@@ -699,7 +741,7 @@ function DiffBlock({
         </div>
       }
     >
-      <pre className="max-h-96 overflow-auto p-0 font-mono text-xs leading-5">
+      <pre className="max-h-96 overflow-auto font-mono text-xs leading-5">
         {diff.split("\n").map((line, i) => {
           let cls = "px-3";
           if (line.startsWith("+++") || line.startsWith("---")) {
@@ -713,7 +755,7 @@ function DiffBlock({
           }
           return (
             <div key={i} className={cls}>
-              {line || " "}
+              {line || " "}
             </div>
           );
         })}
@@ -722,89 +764,30 @@ function DiffBlock({
   );
 }
 
-function PlanBlock({
-  plan,
-  onConfirm,
-  onCancel,
-  isPending,
-  isActive,
+function DoneBlock({
+  prUrl,
+  branchName,
 }: {
-  plan: CodeAIPlan;
-  onConfirm: () => void;
-  onCancel: () => void;
-  isPending: boolean;
-  isActive: boolean;
+  prUrl: string;
+  branchName?: string;
 }) {
   return (
-    <Collapsible
-      defaultOpen
-      header={
-        <div className="flex items-center gap-2">
-          <FileCode className="h-4 w-4 text-blue-600" />
-          <span className="font-medium">План изменений</span>
-          <span className="text-xs text-muted-foreground">
-            ({plan.files_to_change.length} файлов)
-          </span>
-        </div>
-      }
-    >
-      <div className="space-y-3 p-3 text-sm">
-        {plan.reasoning && (
-          <p className="text-muted-foreground">{plan.reasoning}</p>
-        )}
-        <ul className="space-y-1.5">
-          {plan.files_to_change.map((f, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <FileCode className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0">
-                <span className="font-mono text-xs">{f.path}</span>{" "}
-                <Badge variant="outline" className="text-[10px]">
-                  {f.action}
-                </Badge>
-                <p className="text-xs text-muted-foreground">{f.description}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <GitBranch className="h-3 w-3" />
-          <span className="font-mono">{plan.branch_name}</span>
-        </div>
-        {isActive && (
-          <div className="flex gap-2 pt-1">
-            <Button onClick={onConfirm} disabled={isPending} size="sm">
-              ✓ Подтвердить
-            </Button>
-            <Button
-              onClick={onCancel}
-              disabled={isPending}
-              size="sm"
-              variant="outline"
-            >
-              ✗ Отменить
-            </Button>
-          </div>
-        )}
-      </div>
-    </Collapsible>
-  );
-}
-
-function DoneBlock({ prUrl }: { prUrl: string }) {
-  return (
-    <div className="rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+    <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900">
       <div className="flex items-center gap-2 font-semibold">
-        <CheckCircle2 className="h-5 w-5" />
-        Pull Request создан
+        <CheckCircle2 className="h-5 w-5" /> PR создан
       </div>
+      {branchName && (
+        <div className="mt-1 font-mono text-xs text-green-800">
+          {branchName}
+        </div>
+      )}
       <a
         href={prUrl}
         target="_blank"
         rel="noopener noreferrer"
         className="mt-2 inline-flex items-center gap-1 underline"
       >
-        {prUrl}
-        <ExternalLink className="h-3 w-3" />
+        Открыть PR <ExternalLink className="h-3 w-3" />
       </a>
     </div>
   );
