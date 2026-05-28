@@ -48,6 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         gosu \
         postgresql-client \
+        git \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get purge -y --auto-remove \
