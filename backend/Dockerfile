@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
         postgresql-client \
+        git \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 app \
     && useradd  --system --uid 1001 --gid app --home-dir /app --shell /usr/sbin/nologin app
