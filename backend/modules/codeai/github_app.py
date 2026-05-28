@@ -47,6 +47,7 @@ def generate_jwt() -> str:
 
 async def get_installation_token(installation_id: str) -> str:
     """Создаёт installation access token (живёт ~1 час)."""
+    print(f"[GITHUB] Requesting token for installation {installation_id}", flush=True)
     headers = {
         "Authorization": f"Bearer {generate_jwt()}",
         "Accept": "application/vnd.github+json",
@@ -56,6 +57,11 @@ async def get_installation_token(installation_id: str) -> str:
             f"{GITHUB_API}/app/installations/{installation_id}/access_tokens",
             headers=headers,
         )
+        if r.status_code >= 400:
+            print(
+                f"[GITHUB] Token request failed: status={r.status_code} body={r.text}",
+                flush=True,
+            )
         r.raise_for_status()
         return r.json()["token"]
 

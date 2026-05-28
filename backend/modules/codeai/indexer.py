@@ -93,6 +93,8 @@ async def index_repo(
     for f in _iter_files(repo_path):
         all_chunks.extend(_chunk_file(f, Path(repo_path)))
 
+    print(f"[INDEXER] project={project_id} total_chunks={len(all_chunks)}", flush=True)
+
     if not all_chunks:
         logger.info("No files to index in %s", repo_path)
         await _mark_indexed(db, project_id)
@@ -102,6 +104,7 @@ async def index_repo(
     batch_size = 32
     for i in range(0, len(all_chunks), batch_size):
         batch = all_chunks[i : i + batch_size]
+        print(f"[INDEXER] Embedding batch {i}/{len(all_chunks)}", flush=True)
         try:
             embeddings = await openrouter.get_embeddings_batch(
                 [c["content"] for c in batch]

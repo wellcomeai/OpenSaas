@@ -165,7 +165,7 @@ export default function CodeAIProjectChatPage() {
               if (newTask.trim()) createMut.mutate(newTask.trim());
             }}
             isPending={createMut.isPending}
-            disabled={!project?.is_indexed}
+            notIndexed={!project?.is_indexed}
           />
         )}
       </section>
@@ -203,13 +203,13 @@ function NewTaskView({
   onChange,
   onSubmit,
   isPending,
-  disabled,
+  notIndexed,
 }: {
   task: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
   isPending: boolean;
-  disabled: boolean;
+  notIndexed: boolean;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center p-8">
@@ -221,10 +221,11 @@ function NewTaskView({
             покажет его на подтверждение перед коммитом.
           </p>
         </div>
-        {disabled && (
+        {notIndexed && (
           <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
-            Репозиторий ещё не проиндексирован. Запустите индексацию на
-            странице CodeAI.
+            Репозиторий ещё не проиндексирован — агент будет работать только
+            на основе текста задачи, без семантического поиска по коду. Для
+            лучшего качества запустите индексацию на странице CodeAI.
           </div>
         )}
         <Textarea
@@ -235,7 +236,7 @@ function NewTaskView({
         />
         <Button
           onClick={onSubmit}
-          disabled={!task.trim() || isPending || disabled}
+          disabled={!task.trim() || isPending}
         >
           {isPending ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />

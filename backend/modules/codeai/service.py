@@ -121,15 +121,22 @@ async def start_indexing(
 async def _run_indexing(
     project_id: UUID, repo_full_name: str, installation_id: str
 ) -> None:
+    print(f"[CODEAI] _run_indexing START: project={project_id} repo={repo_full_name}", flush=True)
     workspace = Path(settings.codeai_workspace_dir) / f"index-{project_id}"
     try:
+        print(f"[CODEAI] Getting installation token for {installation_id}", flush=True)
         token = await github_app.get_installation_token(installation_id)
+        print(f"[CODEAI] Got token, cloning {repo_full_name} to {workspace}", flush=True)
         repo_path = github_app.clone_repo(repo_full_name, token, str(workspace))
+        print(f"[CODEAI] Cloned successfully, starting indexing", flush=True)
         async with AsyncSessionLocal() as db:
-            await indexer.index_repo(db, project_id, repo_path)
-    except Exception:  # noqa: BLE001
+            count = await indexer.index_repo(db, project_id, repo_path)
+        print(f"[CODEAI] Indexing DONE: {count} chunks for project {project_id}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[CODEAI] _run_indexing FAILED: {type(e).__name__}: {e}", flush=True)
         logger.exception("Indexing failed for project %s", project_id)
     finally:
+        print(f"[CODEAI] Cleanup workspace {workspace}", flush=True)
         github_app.cleanup_workspace(str(workspace))
 
 
