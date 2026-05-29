@@ -226,6 +226,18 @@ async def send_message(
     return CodeAISessionPublic.model_validate(obj)
 
 
+@router.delete(
+    "/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_session(
+    session_id: UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    await service.delete_session(db, user, session_id)
+    return None
+
+
 @router.post("/sessions/{session_id}/cancel", response_model=CodeAISessionPublic)
 async def cancel_session(
     session_id: UUID,

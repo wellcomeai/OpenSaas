@@ -86,6 +86,10 @@ export const codeaiApi = {
     return r.data;
   },
 
+  async deleteSession(sessionId: string): Promise<void> {
+    await apiClient.delete(`/api/v1/codeai/sessions/${sessionId}`);
+  },
+
   // Settings & models
   async getAvailableModels(): Promise<CodeAIModel[]> {
     const r = await apiClient.get("/api/v1/codeai/models");

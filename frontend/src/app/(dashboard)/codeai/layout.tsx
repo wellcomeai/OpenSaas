@@ -8,16 +8,19 @@ export default function CodeAILayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { sidebarOpen, setSidebarOpen, setAutoCollapsed } = useUiStore();
+  const { sidebarOpen, setSidebarOpen, setAutoCollapsed, setHideHeader } =
+    useUiStore();
   const wasOpenRef = useRef(sidebarOpen);
 
   useEffect(() => {
     const wasOpen = wasOpenRef.current;
     setSidebarOpen(false);
     setAutoCollapsed(true);
+    setHideHeader(true);
     return () => {
       if (wasOpen) setSidebarOpen(true);
       setAutoCollapsed(false);
+      setHideHeader(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -9,6 +9,9 @@ import { useUiStore } from "@/store/uiStore";
 export function Header() {
   const { user, logout } = useAuth();
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  const hideHeader = useUiStore((s) => s.hideHeader);
+
+  if (hideHeader) return null;
 
   return (
     <header

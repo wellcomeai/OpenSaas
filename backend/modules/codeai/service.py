@@ -222,6 +222,14 @@ async def cancel_session(
     return session
 
 
+async def delete_session(
+    db: AsyncSession, user: User, session_id: UUID
+) -> None:
+    session = await get_session(db, user, session_id)
+    await db.delete(session)
+    await db.commit()
+
+
 # === Repos via GitHub App ===
 
 async def _user_installation_ids(db: AsyncSession, user: User) -> list[str]:
