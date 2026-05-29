@@ -36,3 +36,8 @@ pgvector==0.3.2
 openai==1.40.0
 PyJWT==2.8.0
 cryptography==42.0.8
+
+# Animations (text → mp4): headless Chromium для покадрового рендера.
+# Браузер ставится через `playwright install chromium` (см. Dockerfile).
+# ffmpeg — системный бинарь (apt), не pip.
+playwright==1.49.0

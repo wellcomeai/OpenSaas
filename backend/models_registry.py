@@ -24,3 +24,4 @@ from modules.codeai.models import (  # noqa: F401
     CodeAISession,
     CodeAISettings,
 )
+from modules.animations.models import AnimationJob  # noqa: F401

@@ -99,6 +99,16 @@ class Settings(BaseSettings):
     codeai_chunk_size: int = Field(default=100)
     codeai_chunk_overlap: int = Field(default=20)
 
+    # === Animations (text → mp4) ===
+    # Использует тот же OPENROUTER_API_KEY. Модель — сильная для генерации
+    # кода (можно переопределить через env без редеплоя).
+    animations_model: str = Field(default="anthropic/claude-3.7-sonnet")
+    animations_max_duration: int = Field(default=30)  # секунд
+    animations_default_fps: int = Field(default=30)
+    animations_output_dir: str = Field(default="./tmp/animations")
+    # Сколько рендеров может идти одновременно (Chromium+ffmpeg прожорливы).
+    animations_max_concurrency: int = Field(default=1)
+
     # === Планы подписки ===
     plan_basic_name: str = Field(default="Basic")
     plan_basic_price: Decimal = Field(default=Decimal("990"))

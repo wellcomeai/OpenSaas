@@ -36,10 +36,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # ---------------------------------------------------------
 # System packages
+# ffmpeg — для склейки кадров в mp4 (модуль animations).
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx \
@@ -48,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         gosu \
         postgresql-client \
+        ffmpeg \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get purge -y --auto-remove \
@@ -77,6 +80,11 @@ WORKDIR /app/backend
 COPY --chown=app:app backend/requirements.txt .
 
 RUN pip install -r requirements.txt
+
+# Headless Chromium для покадрового рендера (модуль animations).
+# Ставим в общий путь PLAYWRIGHT_BROWSERS_PATH, доступный пользователю app.
+RUN playwright install --with-deps chromium \
+    && chmod -R a+rX /ms-playwright
 
 COPY --chown=app:app backend/ .
 

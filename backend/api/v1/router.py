@@ -5,6 +5,7 @@ from fastapi import APIRouter
 
 from api.v1.internal import (
     admin as admin_router,
+    animations as animations_router,
     api_keys as api_keys_router,
     auth as auth_router,
     billing as billing_router,
@@ -24,6 +25,7 @@ api_router.include_router(referrals_router.router)
 api_router.include_router(api_keys_router.router)
 api_router.include_router(admin_router.router)
 api_router.include_router(codeai_router.router)
+api_router.include_router(animations_router.router)
 
 # Public (API key)
 api_router.include_router(public_me_router.router)
