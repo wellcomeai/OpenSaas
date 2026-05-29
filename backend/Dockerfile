@@ -20,7 +20,8 @@ COPY --chown=app:app requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY --chown=app:app . .
-RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
+RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh \
+    && mkdir -p /app/broll_output && chown app:app /app/broll_output
 
 USER app
 

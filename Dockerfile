@@ -67,7 +67,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         /var/lib/nginx/uwsgi \
         /var/lib/nginx/scgi \
         /var/log/nginx \
-    && chown -R app:app /var/lib/nginx /var/log/nginx
+        /app/broll_output \
+    && chown -R app:app /var/lib/nginx /var/log/nginx /app/broll_output
 
 
 # =========================================================

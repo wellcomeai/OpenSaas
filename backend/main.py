@@ -25,7 +25,15 @@ async def lifespan(app: FastAPI):
         logger.info("Redis enabled: %s", settings.redis_url)
     else:
         logger.info("Redis disabled — using PostgreSQL fallback for rate limiting")
-    os.makedirs(settings.broll_output_dir, exist_ok=True)
+    try:
+        os.makedirs(settings.broll_output_dir, exist_ok=True)
+    except OSError as e:
+        logger.warning(
+            "Could not create broll_output_dir %s: %s. "
+            "B-roll rendering will fail until the directory is writable.",
+            settings.broll_output_dir,
+            e,
+        )
     yield
     logger.info("Shutting down")
 
