@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   Bot,
   CreditCard,
+  Film,
   Gift,
   LayoutDashboard,
   Settings,
@@ -21,6 +22,7 @@ import { cn } from "@/lib/utils";
 const userNav = [
   { href: "/dashboard", label: "Главная", icon: LayoutDashboard },
   { href: "/codeai", label: "CodeAI", icon: Bot },
+  { href: "/broll", label: "B-roll", icon: Film },
   { href: "/billing", label: "Подписка", icon: CreditCard },
   { href: "/referrals", label: "Рефералы", icon: Gift },
   { href: "/settings", label: "Настройки", icon: Settings },

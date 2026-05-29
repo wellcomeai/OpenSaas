@@ -10,6 +10,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
+        ffmpeg \
         postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 app \

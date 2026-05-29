@@ -24,3 +24,4 @@ from modules.codeai.models import (  # noqa: F401
     CodeAISession,
     CodeAISettings,
 )
+from modules.broll.models import BrollJob  # noqa: F401

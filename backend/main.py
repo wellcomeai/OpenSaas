@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
         logger.info("Redis enabled: %s", settings.redis_url)
     else:
         logger.info("Redis disabled — using PostgreSQL fallback for rate limiting")
+    os.makedirs(settings.broll_output_dir, exist_ok=True)
     yield
     logger.info("Shutting down")
 

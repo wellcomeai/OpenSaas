@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     codeai_chunk_size: int = Field(default=100)
     codeai_chunk_overlap: int = Field(default=20)
 
+    # === Broll (B-roll генерация) ===
+    broll_output_dir: str = Field(default="/app/broll_output")
+    broll_render_timeout: int = Field(default=90)
+
     # === Планы подписки ===
     plan_basic_name: str = Field(default="Basic")
     plan_basic_price: Decimal = Field(default=Decimal("990"))

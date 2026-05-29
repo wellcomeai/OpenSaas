@@ -61,3 +61,7 @@ nginx/certs/
 # Misc
 *.tmp
 *.bak
+
+# Broll generated videos & scratch
+broll_output/
+scratch/
