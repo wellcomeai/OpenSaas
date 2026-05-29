@@ -3,7 +3,6 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
 import {
   Bot,
   CreditCard,
@@ -129,78 +128,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function IconStrip() {
-  const pathname = usePathname();
-  const user = useAuthStore((s) => s.user);
-  const [hovered, setHovered] = useState(false);
-
-  const allNav = [
-    ...userNav,
-    ...(user?.role === "admin" ? adminNav : []),
-  ];
-
-  return (
-    <div
-      className="relative hidden md:block"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      {/* 48px icon strip */}
-      <aside
-        className="flex w-12 shrink-0 flex-col items-center gap-1 py-3"
-        style={{ borderRight: '1px solid rgba(0,0,0,0.06)', background: '#fafafa', height: '100%' }}
-      >
-        <div className="mb-2 flex h-9 w-9 items-center justify-center">
-          <Image src="/logo.png" alt="logo" width={26} height={26} style={{ borderRadius: '7px' }} />
-        </div>
-        {allNav.map((item) => {
-          const Icon = item.icon;
-          const active =
-            pathname === item.href ||
-            (item.href !== "/dashboard" && pathname?.startsWith(item.href));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={item.label}
-              className={cn(
-                "flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200",
-                active
-                  ? "bg-[rgba(0,102,255,0.08)] text-[#0066FF]"
-                  : "text-[#8e8e93] hover:bg-black/[0.04] hover:text-[#171717]",
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" strokeWidth={active ? 2 : 1.75} />
-            </Link>
-          );
-        })}
-      </aside>
-
-      {/* Full sidebar overlay on hover */}
-      {hovered && (
-        <aside
-          className="fixed inset-y-0 left-0 z-50 flex w-60 flex-col"
-          style={{
-            borderRight: '1px solid rgba(0,0,0,0.06)',
-            background: '#fafafa',
-            boxShadow: '4px 0 24px rgba(0,0,0,0.10)',
-          }}
-        >
-          <SidebarContent />
-        </aside>
-      )}
-    </div>
-  );
-}
-
 export function Sidebar() {
   const { sidebarOpen, setSidebarOpen, autoCollapsed } = useUiStore();
 
+  // On CodeAI pages the page itself has its own left panel — hide desktop sidebar completely.
+  // Keep mobile drawer so hamburger still works on small screens.
   if (autoCollapsed) {
     return (
       <>
-        <IconStrip />
-        {/* Mobile drawer still works normally */}
         {sidebarOpen && (
           <div
             className="fixed inset-0 z-40 bg-black/50 md:hidden backdrop-blur-sm"

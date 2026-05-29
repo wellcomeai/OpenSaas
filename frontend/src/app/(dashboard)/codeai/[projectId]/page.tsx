@@ -13,7 +13,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Check,
-  ChevronLeft,
   ChevronRight,
   Copy,
   ExternalLink,
@@ -45,8 +44,9 @@ function getSessionTitle(task: string): string {
 function relativeDate(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const diffDays = Math.floor(
+    (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24),
+  );
   if (diffDays === 0) return "сегодня";
   if (diffDays === 1) return "вчера";
   if (diffDays < 7) return `${diffDays} дн. назад`;
@@ -80,11 +80,9 @@ function MarkdownContent({ text }: { text: string }) {
     const lines = text.split("\n");
     const result: React.ReactNode[] = [];
     let i = 0;
-
     while (i < lines.length) {
       const line = lines[i];
 
-      // Fenced code block
       if (line.startsWith("```")) {
         const codeLines: string[] = [];
         i++;
@@ -104,7 +102,6 @@ function MarkdownContent({ text }: { text: string }) {
         continue;
       }
 
-      // Heading
       if (line.startsWith("### ")) {
         result.push(
           <p key={`h-${i}`} className="font-semibold">
@@ -115,20 +112,19 @@ function MarkdownContent({ text }: { text: string }) {
         continue;
       }
       if (line.startsWith("## ") || line.startsWith("# ")) {
-        const depth = line.startsWith("## ") ? 2 : 1;
+        const d = line.startsWith("## ") ? 2 : 1;
         result.push(
           <p
             key={`h-${i}`}
-            className={cn("font-bold", depth === 1 ? "text-base" : "text-sm")}
+            className={cn("font-bold", d === 1 ? "text-base" : "text-sm")}
           >
-            {renderInline(line.slice(depth + 1))}
+            {renderInline(line.slice(d + 1))}
           </p>,
         );
         i++;
         continue;
       }
 
-      // List block
       if (line.match(/^[-*] /) || line.match(/^\d+\. /)) {
         const items: string[] = [];
         const ordered = /^\d+\. /.test(line);
@@ -136,14 +132,19 @@ function MarkdownContent({ text }: { text: string }) {
           i < lines.length &&
           (lines[i].match(/^[-*] /) || lines[i].match(/^\d+\. /))
         ) {
-          items.push(lines[i].replace(/^[-*] /, "").replace(/^\d+\. /, ""));
+          items.push(
+            lines[i].replace(/^[-*] /, "").replace(/^\d+\. /, ""),
+          );
           i++;
         }
         const Tag = ordered ? "ol" : "ul";
         result.push(
           <Tag
             key={`list-${i}`}
-            className={cn("pl-4 space-y-0.5", ordered ? "list-decimal" : "list-disc")}
+            className={cn(
+              "pl-4 space-y-0.5",
+              ordered ? "list-decimal" : "list-disc",
+            )}
           >
             {items.map((item, j) => (
               <li key={j}>{renderInline(item)}</li>
@@ -153,20 +154,15 @@ function MarkdownContent({ text }: { text: string }) {
         continue;
       }
 
-      // Empty line
       if (line.trim() === "") {
         result.push(<div key={`br-${i}`} className="h-1.5" />);
         i++;
         continue;
       }
 
-      // Paragraph
-      result.push(
-        <p key={`p-${i}`}>{renderInline(line)}</p>,
-      );
+      result.push(<p key={`p-${i}`}>{renderInline(line)}</p>);
       i++;
     }
-
     return result;
   }, [text]);
 
@@ -211,18 +207,15 @@ function ModelSelector() {
     queryKey: ["codeai-models"],
     queryFn: () => codeaiApi.getAvailableModels(),
   });
-
   const updateMut = useMutation({
     mutationFn: (model: string) => codeaiApi.updateSettings({ model }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["codeai-settings"] }),
     onError: () => toast.error("Не удалось сменить модель"),
   });
-
   const opts = useMemo(
     () => (models ? [...models].sort((a, b) => a.id.localeCompare(b.id)) : []),
     [models],
   );
-
   return (
     <div>
       <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -248,7 +241,7 @@ function ModelSelector() {
   );
 }
 
-// ─── Left panel ───────────────────────────────────────────────────────────────
+// ─── Session item ─────────────────────────────────────────────────────────────
 
 function SessionItem({
   session,
@@ -262,11 +255,10 @@ function SessionItem({
   onDelete: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
-
   return (
     <div
       className={cn(
-        "relative flex cursor-pointer items-start gap-1.5 rounded-lg px-2.5 py-2 transition-colors",
+        "relative flex cursor-pointer items-start gap-1 rounded-lg px-2.5 py-2 transition-colors",
         active
           ? "border-l-2 border-primary bg-primary/8 pl-2"
           : "border-l-2 border-transparent hover:bg-muted/60",
@@ -308,6 +300,8 @@ function SessionItem({
   );
 }
 
+// ─── Left panel (always visible, no collapse) ─────────────────────────────────
+
 function LeftPanel({
   projectId,
   project,
@@ -315,8 +309,6 @@ function LeftPanel({
   activeSessionId,
   onSelect,
   onNew,
-  collapsed,
-  onToggleCollapse,
 }: {
   projectId: string;
   project: CodeAIProject | undefined;
@@ -324,11 +316,8 @@ function LeftPanel({
   activeSessionId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
 }) {
   const qc = useQueryClient();
-
   const deleteMut = useMutation({
     mutationFn: (id: string) => codeaiApi.deleteSession(id),
     onSuccess: (_d, id) => {
@@ -340,90 +329,60 @@ function LeftPanel({
 
   return (
     <aside
-      className={cn(
-        "flex flex-col border-r transition-all duration-200",
-        collapsed ? "w-12" : "w-[220px]",
-      )}
-      style={{ background: "#fafafa", borderColor: "rgba(0,0,0,0.06)" }}
+      className="flex w-[220px] shrink-0 flex-col"
+      style={{
+        borderRight: "1px solid rgba(0,0,0,0.06)",
+        background: "#fafafa",
+      }}
     >
-      {/* Header row */}
+      {/* Repo name */}
       <div
-        className="flex h-11 shrink-0 items-center justify-between px-2"
+        className="flex h-11 shrink-0 items-center px-3"
         style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}
       >
-        {!collapsed && (
-          <span className="truncate font-mono text-[11px] text-muted-foreground">
-            {project?.repo_full_name ?? "…"}
-          </span>
-        )}
+        <span className="truncate font-mono text-[11px] text-muted-foreground">
+          {project?.repo_full_name ?? "…"}
+        </span>
+      </div>
+
+      {/* New task button */}
+      <div className="p-2.5 pb-2">
         <button
           type="button"
-          onClick={onToggleCollapse}
-          className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60"
-          title={collapsed ? "Развернуть" : "Свернуть"}
+          onClick={onNew}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90"
         >
-          {collapsed ? (
-            <ChevronRight className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronLeft className="h-3.5 w-3.5" />
-          )}
+          <Plus className="h-3.5 w-3.5" />
+          Новая задача
         </button>
       </div>
 
-      {collapsed ? (
-        /* Collapsed: just a new-task icon */
-        <div className="flex flex-col items-center gap-1 p-1.5 pt-2">
-          <button
-            type="button"
-            title="Новая задача (⌘K)"
-            onClick={onNew}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:opacity-90"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ) : (
-        <>
-          {/* New task button */}
-          <div className="p-2.5 pb-2">
-            <button
-              type="button"
-              onClick={onNew}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Новая задача
-            </button>
-          </div>
+      {/* Sessions list */}
+      <div className="flex-1 overflow-y-auto px-1.5 py-1">
+        {sessions.length === 0 ? (
+          <p className="mt-6 px-3 text-center text-xs text-muted-foreground">
+            Создай первую задачу
+          </p>
+        ) : (
+          sessions.map((s) => (
+            <SessionItem
+              key={s.id}
+              session={s}
+              active={s.id === activeSessionId}
+              onSelect={() => onSelect(s.id)}
+              onDelete={() => deleteMut.mutate(s.id)}
+            />
+          ))
+        )}
+      </div>
 
-          {/* Sessions list */}
-          <div className="flex-1 overflow-y-auto px-1.5 py-1">
-            {sessions.length === 0 ? (
-              <p className="mt-4 px-3 text-center text-xs text-muted-foreground">
-                Создай первую задачу
-              </p>
-            ) : (
-              sessions.map((s) => (
-                <SessionItem
-                  key={s.id}
-                  session={s}
-                  active={s.id === activeSessionId}
-                  onSelect={() => onSelect(s.id)}
-                  onDelete={() => deleteMut.mutate(s.id)}
-                />
-              ))
-            )}
-          </div>
-
-          {/* Model selector at bottom */}
-          <div
-            className="shrink-0 p-3"
-            style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}
-          >
-            <ModelSelector />
-          </div>
-        </>
-      )}
+      {/* Model selector pinned at bottom */}
+      <div
+        className="shrink-0 p-3"
+        style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}
+      >
+        <ModelSelector />
+      </div>
     </aside>
   );
 }
@@ -803,13 +762,7 @@ function DiffBlock({
   );
 }
 
-function DoneBlock({
-  prUrl,
-  branchName,
-}: {
-  prUrl: string;
-  branchName?: string;
-}) {
+function DoneBlock({ prUrl, branchName }: { prUrl: string; branchName?: string }) {
   return (
     <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
       <div className="flex items-center gap-2 font-semibold">
@@ -843,9 +796,7 @@ function BlockView({ block }: { block: AgentBlock }) {
       transition={{ duration: 0.18 }}
     >
       {block.kind === "user" && <UserBubble text={block.text ?? ""} />}
-      {block.kind === "assistant" && (
-        <AssistantBubble text={block.text ?? ""} />
-      )}
+      {block.kind === "assistant" && <AssistantBubble text={block.text ?? ""} />}
       {block.kind === "tool" && (
         <ToolBlock
           name={block.toolName ?? ""}
@@ -865,6 +816,77 @@ function BlockView({ block }: { block: AgentBlock }) {
         <DoneBlock prUrl={block.prUrl ?? ""} branchName={block.branchName} />
       )}
     </motion.div>
+  );
+}
+
+// ─── Chat input bar (shared between new-session and existing-session views) ────
+
+function ChatInput({
+  onSend,
+  disabled,
+  placeholder,
+  loading,
+}: {
+  onSend: (text: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  loading?: boolean;
+}) {
+  const [input, setInput] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  const send = useCallback(() => {
+    const text = input.trim();
+    if (!text || disabled) return;
+    onSend(text);
+    setInput("");
+    if (ref.current) {
+      ref.current.style.height = "auto";
+    }
+  }, [input, disabled, onSend]);
+
+  return (
+    <div className="flex items-end gap-2">
+      <textarea
+        ref={ref}
+        rows={1}
+        value={input}
+        onChange={(e) => {
+          setInput(e.target.value);
+          e.target.style.height = "auto";
+          e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            send();
+          }
+        }}
+        placeholder={
+          placeholder ??
+          "Напиши задачу или вопрос… (Enter — отправить, Shift+Enter — новая строка)"
+        }
+        disabled={disabled}
+        className="flex-1 resize-none overflow-hidden rounded-xl border bg-background px-4 py-2.5 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+        style={{ minHeight: "44px" }}
+      />
+      <button
+        type="button"
+        onClick={send}
+        disabled={!input.trim() || disabled}
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Send className="h-4 w-4" />
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -899,11 +921,7 @@ function SessionView({
   useEffect(() => {
     if (stream.events.length === 0) return;
     const last = stream.events[stream.events.length - 1];
-    if (
-      last.type === "done" ||
-      last.type === "error" ||
-      last.type === "assistant"
-    ) {
+    if (last.type === "done" || last.type === "error" || last.type === "assistant") {
       qc.invalidateQueries({ queryKey: ["codeai-session", sessionId] });
       qc.invalidateQueries({ queryKey: ["codeai-messages", sessionId] });
       qc.invalidateQueries({ queryKey: ["codeai-sessions", projectId] });
@@ -912,9 +930,7 @@ function SessionView({
 
   const cancelMut = useMutation({
     mutationFn: () => codeaiApi.cancelSession(sessionId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["codeai-session", sessionId] });
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["codeai-session", sessionId] }),
   });
 
   const sendMut = useMutation({
@@ -927,40 +943,18 @@ function SessionView({
   });
 
   const blocks = useMemo(
-    () =>
-      buildBlocks(
-        messages ?? [],
-        stream.events as StreamEvent[],
-        session ?? null,
-      ),
+    () => buildBlocks(messages ?? [], stream.events as StreamEvent[], session ?? null),
     [messages, stream.events, session],
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const prevBlockCount = useRef(0);
+  const prevCount = useRef(0);
   useEffect(() => {
-    if (blocks.length !== prevBlockCount.current) {
-      prevBlockCount.current = blocks.length;
-      scrollRef.current?.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: "smooth",
-      });
+    if (blocks.length !== prevCount.current) {
+      prevCount.current = blocks.length;
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
     }
   }, [blocks]);
-
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, [sessionId]);
-
-  const [input, setInput] = useState("");
-
-  const send = useCallback(() => {
-    const text = input.trim();
-    if (!text || isRunning || sendMut.isPending) return;
-    sendMut.mutate(text);
-    setInput("");
-  }, [input, isRunning, sendMut]);
 
   if (!session) {
     return (
@@ -972,19 +966,13 @@ function SessionView({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Messages */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto px-6 py-5"
-      >
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mx-auto max-w-2xl space-y-4 pb-4">
           <AnimatePresence initial={false}>
             {blocks.map((b) => (
               <BlockView key={b.key} block={b} />
             ))}
           </AnimatePresence>
-
-          {/* Typing indicator while agent is running and no live events yet */}
           {isRunning && stream.events.length === 0 && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -998,11 +986,7 @@ function SessionView({
         </div>
       </div>
 
-      {/* Input area */}
-      <div
-        className="shrink-0 px-6 pb-5 pt-3"
-        style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}
-      >
+      <div className="shrink-0 px-6 pb-5 pt-3" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
         <div className="mx-auto max-w-2xl">
           {isRunning && (
             <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
@@ -1020,50 +1004,20 @@ function SessionView({
               </button>
             </div>
           )}
-          <div className="flex items-end gap-2">
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                // Auto-resize
-                e.target.style.height = "auto";
-                e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              placeholder="Напиши задачу или вопрос… (Enter — отправить, Shift+Enter — новая строка)"
-              disabled={isRunning || sendMut.isPending}
-              className="flex-1 resize-none overflow-hidden rounded-xl border bg-background px-4 py-2.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-              style={{ minHeight: "44px" }}
-            />
-            <button
-              type="button"
-              onClick={send}
-              disabled={!input.trim() || isRunning || sendMut.isPending}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {sendMut.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-            </button>
-          </div>
+          <ChatInput
+            onSend={(text) => sendMut.mutate(text)}
+            disabled={isRunning || sendMut.isPending}
+            loading={sendMut.isPending}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-// ─── New task view ────────────────────────────────────────────────────────────
+// ─── New session area (empty chat + input, creates session on first send) ──────
 
-function NewTaskView({
+function NewSessionArea({
   projectId,
   onCreated,
 }: {
@@ -1071,13 +1025,6 @@ function NewTaskView({
   onCreated: (sessionId: string) => void;
 }) {
   const qc = useQueryClient();
-  const [task, setTask] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
-
   const createMut = useMutation({
     mutationFn: (text: string) =>
       codeaiApi.createSession({ project_id: projectId, task: text }),
@@ -1088,58 +1035,41 @@ function NewTaskView({
     onError: () => toast.error("Не удалось создать сессию"),
   });
 
-  const submit = () => {
-    const text = task.trim();
-    if (!text || createMut.isPending) return;
-    createMut.mutate(text);
-  };
-
   return (
-    <div className="flex h-full flex-col items-center justify-center px-6">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22 }}
-        className="w-full max-w-xl space-y-4"
+    <div className="flex h-full flex-col">
+      {/* Empty state center */}
+      <div className="flex flex-1 flex-col items-center justify-center px-6">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="text-center"
+        >
+          <div className="mb-2 text-2xl">💬</div>
+          <h2 className="text-base font-semibold">Новая задача</h2>
+          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+            Задай вопрос, опиши баг или фичу — агент решит, нужно ли читать код.
+          </p>
+        </motion.div>
+      </div>
+
+      {/* Input pinned at bottom */}
+      <div
+        className="shrink-0 px-6 pb-5 pt-3"
+        style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}
       >
-        <div>
-          <h2 className="text-lg font-semibold">Новая задача</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Задай вопрос, опиши баг или фичу — агент решит, нужно ли читать
-            код.
+        <div className="mx-auto max-w-2xl">
+          <ChatInput
+            onSend={(text) => createMut.mutate(text)}
+            disabled={createMut.isPending}
+            loading={createMut.isPending}
+            placeholder="Например: добавь Google OAuth… (Enter — отправить)"
+          />
+          <p className="mt-1.5 text-center text-xs text-muted-foreground">
+            Shift+Enter — новая строка · ⌘K — новая задача
           </p>
         </div>
-        <textarea
-          ref={textareaRef}
-          rows={4}
-          value={task}
-          onChange={(e) => setTask(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder="Например: добавь авторизацию через Google OAuth"
-          className="w-full resize-none rounded-xl border bg-background px-4 py-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/30"
-        />
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!task.trim() || createMut.isPending}
-          className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {createMut.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
-          )}
-          Отправить
-        </button>
-        <p className="text-xs text-muted-foreground">
-          Enter — отправить · Shift+Enter — новая строка · ⌘K — новая задача
-        </p>
-      </motion.div>
+      </div>
     </div>
   );
 }
@@ -1151,7 +1081,6 @@ export default function CodeAIProjectChatPage() {
   const projectId = params.projectId;
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const { data: projects } = useQuery({
     queryKey: ["codeai-projects"],
@@ -1166,7 +1095,7 @@ export default function CodeAIProjectChatPage() {
     refetchInterval: 5000,
   });
 
-  // Auto-select most recent session
+  // Auto-select most recent session on first load
   useEffect(() => {
     if (!activeSessionId && sessions && sessions.length > 0) {
       setActiveSessionId(sessions[0].id);
@@ -1186,6 +1115,7 @@ export default function CodeAIProjectChatPage() {
   }, []);
 
   return (
+    // -m-6 cancels the dashboard layout's p-6; h-screen fills full viewport (header is hidden)
     <div className="-m-6 flex h-screen overflow-hidden">
       <LeftPanel
         projectId={projectId}
@@ -1194,8 +1124,6 @@ export default function CodeAIProjectChatPage() {
         activeSessionId={activeSessionId}
         onSelect={setActiveSessionId}
         onNew={() => setActiveSessionId(null)}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
       />
 
       <section className="flex flex-1 flex-col overflow-hidden bg-background">
@@ -1206,7 +1134,8 @@ export default function CodeAIProjectChatPage() {
             projectId={projectId}
           />
         ) : (
-          <NewTaskView
+          <NewSessionArea
+            key="new"
             projectId={projectId}
             onCreated={(id) => setActiveSessionId(id)}
           />
