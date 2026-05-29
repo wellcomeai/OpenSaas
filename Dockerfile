@@ -29,8 +29,12 @@ RUN npm run build
 # - gunicorn
 # - nextjs standalone server
 # managed by supervisord
+#
+# База ПИНУЕТСЯ на bookworm: список системных либ Chromium ниже завязан на
+# имена пакетов Debian 12 (libasound2, libatk1.0-0, ...). В trixie/noble они
+# переименованы в *t64 — фиксируем релиз, чтобы сборка не сломалась молча.
 # =========================================================
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -41,7 +45,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # ---------------------------------------------------------
 # System packages
-# ffmpeg — для склейки кадров в mp4 (модуль animations).
+# ffmpeg                — склейка кадров в mp4 (модуль animations).
+# fonts-* / lib*        — системные зависимости headless Chromium (Playwright).
+#   Ставим ВРУЧНУЮ с актуальными именами пакетов и НЕ через
+#   `playwright install --with-deps`: его внутренний apt-список рассчитан на
+#   Ubuntu jammy и на Debian ломается (ttf-unifont/ttf-ubuntu-font-family
+#   переименованы в fonts-unifont/fonts-ubuntu) → apt exit 100 → падение build.
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx \
@@ -51,6 +60,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gosu \
         postgresql-client \
         ffmpeg \
+        fonts-unifont \
+        fonts-ubuntu \
+        fonts-liberation \
+        fonts-noto-color-emoji \
+        libnss3 \
+        libnspr4 \
+        libatk1.0-0 \
+        libatk-bridge2.0-0 \
+        libcups2 \
+        libdrm2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libasound2 \
+        libpango-1.0-0 \
+        libcairo2 \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get purge -y --auto-remove \
@@ -82,8 +110,10 @@ COPY --chown=app:app backend/requirements.txt .
 RUN pip install -r requirements.txt
 
 # Headless Chromium для покадрового рендера (модуль animations).
-# Ставим в общий путь PLAYWRIGHT_BROWSERS_PATH, доступный пользователю app.
-RUN playwright install --with-deps chromium \
+# БЕЗ --with-deps: системные либы уже поставлены выше через apt с корректными
+# именами. Ставим только бинарь браузера в общий путь PLAYWRIGHT_BROWSERS_PATH
+# (читаемо для пользователя app, под которым работает gunicorn).
+RUN playwright install chromium \
     && chmod -R a+rX /ms-playwright
 
 COPY --chown=app:app backend/ .
