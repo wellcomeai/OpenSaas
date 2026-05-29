@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-echo "==> Running database migrations..."
-alembic upgrade head
+echo "==> Ensuring database schema (create_all from models, no Alembic)..."
+python scripts/init_db.py
 
 echo "==> Ensuring admin user / default plans..."
 python scripts/create_admin.py
