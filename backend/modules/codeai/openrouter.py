@@ -81,7 +81,14 @@ async def chat_completion(
             headers=_headers(),
             json=payload,
         )
-        r.raise_for_status()
+        if r.is_error:
+            # Прокидываем тело ответа: OpenRouter на 404/4xx пишет в нём
+            # причину (например "No endpoints found for <model>"), иначе
+            # raise_for_status проглатывает её и в логах остаётся голый код.
+            raise RuntimeError(
+                f"OpenRouter chat_completion failed "
+                f"(HTTP {r.status_code}, model={model_id!r}): {r.text}"
+            )
         data = r.json()
     choices = data.get("choices") or []
     if not choices:
