@@ -45,6 +45,10 @@ class AnimationJob(Base):
         index=True,
     )
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    # Пресет стиля B-roll (см. modules.animations.config.BROLL_STYLES).
+    style: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="auto"
+    )
     duration: Mapped[int] = mapped_column(Integer, nullable=False)
     fps: Mapped[int] = mapped_column(Integer, nullable=False)
     width: Mapped[int] = mapped_column(Integer, nullable=False)

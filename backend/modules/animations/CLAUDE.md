@@ -51,10 +51,28 @@ AI-генерация видео-анимаций из текста (text → mp
 Для надёжного исполнителя — вынести `process_job` в Celery/arq (интерфейс
 уже независим от способа запуска).
 
+## B-roll стили (пресеты)
+
+Поле `style` в запросе (`config.BROLL_STYLES`) подмешивает направление в
+system prompt. Значения: `auto` (по умолчанию, без доп. указаний),
+`gradient`, `kinetic_text`, `particles`, `geometric`, `dataviz`. Хранится
+в колонке `animation_jobs.style` (миграция `0014`).
+
+## Запрос к LLM (надёжность)
+
+`openrouter.generate_animation_html` ходит через общий клиент
+`codeai.openrouter`. По умолчанию используется **потоковый разбор SSE**
+(`chat_completion_stream`, флаг `ANIMATIONS_STREAM`) — он устойчив к
+keep-alive комментариям OpenRouter (`: OPENROUTER PROCESSING`) и обрывам,
+которые иначе ломали единый `r.json()` (ошибка `Expecting value: line N`).
+При `ANIMATIONS_STREAM=false` используется buffered-путь `chat_completion`
+с устойчивым разбором (срез keep-alive строк + понятная ошибка вместо
+`JSONDecodeError`). Таймаут чтения — `ANIMATIONS_REQUEST_TIMEOUT` сек.
+
 ## Endpoints (`/api/v1/animations`)
 
 ```
-POST /generate              -- создать задачу, вернуть job_id (202)
+POST /generate              -- создать задачу, вернуть job_id (202); поля: prompt, duration, fps, aspect, style
 GET  /jobs                  -- список задач юзера
 GET  /jobs/{job_id}         -- статус + progress + download_url
 GET  /jobs/{job_id}/download -- mp4 (FileResponse, attachment)
@@ -69,6 +87,8 @@ ANIMATIONS_MAX_DURATION      (дефолт 30 сек)
 ANIMATIONS_DEFAULT_FPS       (дефолт 30; разрешены 24/30)
 ANIMATIONS_OUTPUT_DIR        (дефолт ./tmp/animations)
 ANIMATIONS_MAX_CONCURRENCY   (дефолт 1)
+ANIMATIONS_STREAM            (дефолт true; потоковый разбор SSE)
+ANIMATIONS_REQUEST_TIMEOUT   (дефолт 300; read-timeout LLM, сек)
 ```
 
 ## Инфраструктура

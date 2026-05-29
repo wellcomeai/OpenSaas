@@ -1,6 +1,8 @@
 """System prompt для генерации HTML-анимации через LLM."""
 from __future__ import annotations
 
+from modules.animations.config import resolve_style_hint
+
 SYSTEM_PROMPT = """You are an expert motion-graphics engineer. You output ONE self-contained HTML
 document that renders a frame-based animation. STRICT CONTRACT:
 
@@ -16,7 +18,7 @@ document that renders a frame-based animation. STRICT CONTRACT:
 5. Solid background (unless asked otherwise). Call renderFrame(0) once on load.
 6. Make it visually polished: smooth easing (write your own easing helpers like
    easeInOutCubic), good typography, tasteful timing for {DURATION} seconds.
-
+{STYLE_HINT}
 Output ONLY the HTML document. No explanation, no markdown fences.
 The user's animation request (may be in any language): {USER_PROMPT}"""
 
@@ -31,11 +33,15 @@ RETRY_HINT = (
 
 
 def build_system_prompt(
-    *, prompt: str, duration: int, width: int, height: int
+    *, prompt: str, duration: int, width: int, height: int, style: str = "auto"
 ) -> str:
+    hint = resolve_style_hint(style)
+    # Стиль подмешиваем отдельным пунктом контракта только если он задан.
+    style_line = f"7. {hint}\n" if hint else ""
     return SYSTEM_PROMPT.format(
         DURATION=duration,
         WIDTH=width,
         HEIGHT=height,
+        STYLE_HINT=style_line,
         USER_PROMPT=prompt,
     )

@@ -10,7 +10,9 @@ from config import settings
 from modules.animations.config import (
     ALLOWED_ASPECTS,
     ALLOWED_FPS,
+    ALLOWED_STYLES,
     DEFAULT_DURATION,
+    DEFAULT_STYLE,
     MAX_PROMPT_LENGTH,
 )
 from modules.animations.models import AnimationJobStatus
@@ -21,6 +23,7 @@ class AnimationGenerateRequest(BaseModel):
     duration: int = Field(default=DEFAULT_DURATION, ge=1)
     fps: int = Field(default=settings.animations_default_fps)
     aspect: str = Field(default="9:16")
+    style: str = Field(default=DEFAULT_STYLE)
 
     @field_validator("duration")
     @classmethod
@@ -45,6 +48,13 @@ class AnimationGenerateRequest(BaseModel):
             raise ValueError(f"aspect must be one of {ALLOWED_ASPECTS}")
         return v
 
+    @field_validator("style")
+    @classmethod
+    def _check_style(cls, v: str) -> str:
+        if v not in ALLOWED_STYLES:
+            raise ValueError(f"style must be one of {ALLOWED_STYLES}")
+        return v
+
 
 class AnimationGenerateResponse(BaseModel):
     job_id: UUID
@@ -62,6 +72,7 @@ class AnimationJobPublic(BaseModel):
     fps: int
     width: int
     height: int
+    style: str
     download_url: str | None = Field(default=None, validation_alias="output_url")
     error_message: str | None = None
     created_at: datetime

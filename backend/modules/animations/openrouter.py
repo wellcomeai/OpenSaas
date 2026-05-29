@@ -60,7 +60,7 @@ def validate_html(html: str) -> str | None:
 
 
 async def generate_animation_html(
-    *, prompt: str, duration: int, width: int, height: int
+    *, prompt: str, duration: int, width: int, height: int, style: str = "auto"
 ) -> str:
     """Генерирует валидный HTML. Один авто-ретрай при провале валидации.
 
@@ -68,8 +68,9 @@ async def generate_animation_html(
     или OpenRouter недоступен.
     """
     model = settings.animations_model
+    timeout = float(settings.animations_request_timeout)
     system_prompt = build_system_prompt(
-        prompt=prompt, duration=duration, width=width, height=height
+        prompt=prompt, duration=duration, width=width, height=height, style=style
     )
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
@@ -79,18 +80,34 @@ async def generate_animation_html(
     last_error = ""
     for attempt in range(2):
         try:
-            raw = await base_openrouter.chat_completion(
-                model,
-                messages,
-                temperature=0.3,
-                max_tokens=16000,
-            )
+            if settings.animations_stream:
+                raw = await base_openrouter.chat_completion_stream(
+                    model,
+                    messages,
+                    temperature=0.3,
+                    max_tokens=16000,
+                    timeout=timeout,
+                )
+            else:
+                raw = await base_openrouter.chat_completion(
+                    model,
+                    messages,
+                    temperature=0.3,
+                    max_tokens=16000,
+                    timeout=timeout,
+                )
         except Exception as exc:  # noqa: BLE001
             # Сетевые / API ошибки OpenRouter — не падаем молча.
             raise AnimationGenerationError(
                 f"OpenRouter request failed: {exc}"
             ) from exc
 
+        logger.info(
+            "Animation LLM raw length=%d (attempt %d, stream=%s)",
+            len(raw),
+            attempt + 1,
+            settings.animations_stream,
+        )
         html = strip_markdown_fences(raw)
         error = validate_html(html)
         if error is None:

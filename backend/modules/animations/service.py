@@ -66,6 +66,7 @@ async def create_job(
     job = AnimationJob(
         user_id=user.id,
         prompt=payload.prompt,
+        style=payload.style,
         duration=payload.duration,
         fps=payload.fps,
         width=width,
@@ -138,6 +139,7 @@ async def process_job(job_id: UUID) -> None:
         width = job.width
         height = job.height
         prompt = job.prompt
+        style = job.style
 
         try:
             # 1. Генерация HTML через LLM.
@@ -145,7 +147,11 @@ async def process_job(job_id: UUID) -> None:
                 db, job, AnimationJobStatus.GENERATING_HTML, progress=0.0
             )
             html = await openrouter.generate_animation_html(
-                prompt=prompt, duration=duration, width=width, height=height
+                prompt=prompt,
+                duration=duration,
+                width=width,
+                height=height,
+                style=style,
             )
             job.html = html
             await db.commit()

@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     animations_output_dir: str = Field(default="./tmp/animations")
     # Сколько рендеров может идти одновременно (Chromium+ffmpeg прожорливы).
     animations_max_concurrency: int = Field(default=1)
+    # Потоковый разбор ответа LLM (SSE). Устойчив к keep-alive комментариям
+    # OpenRouter и обрывам. Можно отключить (False) → buffered JSON-путь.
+    animations_stream: bool = Field(default=True)
+    # read-timeout запроса к LLM в секундах (большой HTML генерится долго).
+    animations_request_timeout: int = Field(default=300)
 
     # === Планы подписки ===
     plan_basic_name: str = Field(default="Basic")
